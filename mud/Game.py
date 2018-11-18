@@ -56,7 +56,7 @@ def assign_attributes(data,hp,sp,mp,str,defe,dex,wis,cha):  # assign given value
     return data
 
 def assign_ability(data,type,abilityname,attribute):
-    new = abilityname: [{attribute }]
+    new = [{abilityname: attribute }]
     data["character"][0]["abilities"][0][abilityname][0][attribute]
 
 
