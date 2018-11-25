@@ -16,6 +16,54 @@ attributes = ["max_health",    # max amount to take damage
               "damage"]        # natural weapon's damage
 
 
+class World:
+    def __init__(self):
+        self.__enchantments = dict()
+        self.__races = dict()
+        self.__weapon_types = dict()
+
+    def new_race(self, name, max_health, stamina, magic, strength, agility, dexterity, intelligence, perception,
+                 armor, damage):
+        r = Race(name, max_health, stamina, magic, strength, agility, dexterity, intelligence, perception,
+                 armor, damage)
+        self.__races.update({name: r})
+
+    def races(self):
+        return self.__races
+
+    def race(self, name):
+        return self.__races[name]
+
+    def new_enchantment(self, name, effects):
+        e = Enchantment(name, effects)
+        self.__enchantments.update({name: e})
+
+    def enchantments(self):
+        return self.__enchantments
+
+    def enchantment(self, name):
+        if name != '?':
+            result = self.__enchantments[name]
+            if result is None:
+                raise ValueError("unknown enchantemen name: " + str(result))
+        else:
+            result = random.choice(list(self.__enchantments.values()))
+        return result
+
+    def new_weapon_type(self, name, weight, damage_dice, offence, hands):
+        wt = WeaponType(name, weight, damage_dice, offence, hands)
+        self.__weapon_types.update({name: wt})
+
+    def weapon_types(self):
+        return self.__weapon_types
+
+    def weapon_type(self, name):
+        return self.__weapon_types[name]
+
+
+world = World()
+
+
 # Alle objecten op de wereld
 class WorldObject:
     def __init__(self, name):
@@ -35,9 +83,7 @@ class Character(WorldObject):
         if type(race) is Race:
             self.__race = race
         else:
-            self.__race = all_races[race]
-            if self.__race is None:
-                raise ValueError("Unknown race: "+str(self.__race))
+            self.__race = world.race(race)
         super().__init__(self.__race.default_name() if name is None else name)
         self.__attributes = {"max_health":   self.__race.roll_max_health(hero) if max_health is None else max_health,
                              "stamina":      self.__race.roll_stamina(hero) if stamina is None else stamina,
@@ -167,10 +213,6 @@ class Character(WorldObject):
             print(self.name(), "attacks", other.name(), "but misses")
 
 
-# each time a race is constructed, it is put in this dictionary.
-all_races = dict()
-
-
 class Race:
     def __init__(self, name, max_health, stamina, magic, strength, agility, dexterity, intelligence, perception,
                  armor, damage):
@@ -185,7 +227,6 @@ class Race:
         self.__magic = magic
         self.__armor = armor
         self.__damage = damage
-        all_races.update({name: self})
 
     def name(self):
         return self.__name
@@ -275,18 +316,10 @@ class Item(WorldObject):
         if self.__equipped:
             raise ValueError("Equipped items can not be enchanted.")
         if type(enchantment) != Enchantment:
-            if enchantment != '?':
-                enchantment = all_enchatments[enchantment]
-                if enchantment is None:
-                    raise ValueError("unknown enchantemen name: "+str(enchantment))
-            else:
-                enchantment = random.choice(list(all_enchatments.values()))
+            enchantment = world.enchantment(enchantment)
         self.__effects = self.__effects + enchantment.effects()
         self.rename(enchantment.name() % self.name())
         return self
-
-
-all_weapon_types = dict()
 
 
 class WeaponType:
@@ -296,7 +329,7 @@ class WeaponType:
         self.__damage_dice = damage_dice
         self.__offence = offence
         self.__hands = hands
-        all_weapon_types.update({name: self})
+        world.weapon_types().update({name: self})
 
     def stats(self):
         return self.__weight, self.__damage_dice, self.__offence, self.__hands
@@ -311,12 +344,9 @@ class Ring(Item):
 
 
 class Weapon(Item):
-    def __init__(self, name, weight=None, damage_dice=None, offence=None, hands=None, enchantments=None):
-        if name in all_weapon_types:
-            weight, damage_dice, offence, hands = all_weapon_types[name].stats()
-        else:
-            if weight is None or damage_dice is None or offence is None or hands is None:
-                raise ValueError("New type of weapon: "+str(name)+", please supply weight, damage_dice and offence")
+    def __init__(self, name, enchantments=None):
+        wt = world.weapon_type(name)
+        weight, damage_dice, offence, hands = wt.stats()
         effects = [ReplaceAttributeEffect("damage", damage_dice)]
         if offence > 0:
             effects.append(ModifyAttributeEffect("offence", offence))
@@ -338,14 +368,10 @@ class Effect:
         return self.__permanent
 
 
-all_enchatments = dict()
-
-
 class Enchantment:
     def __init__(self, name, effects):
         self.__name = name
         self.__effects = effects
-        all_enchatments.update({name: self})
 
     def name(self):
         return self.__name
@@ -405,44 +431,42 @@ def healing_effect(number):
     return ModifyAttributeEffect("wounds", -number, permanent=True)
 
 
-WeaponType("arming sword", 10, 2*Dice(10), 6, 1)
-WeaponType("scimitar", 10, 3*Dice(6)+1, 5, 1)
-WeaponType("long sword", 20, 2*Dice(12), 6, 2)
-WeaponType("short sword", 5, 2*Dice(8), 4, 1)
-WeaponType("dagger", 2, 2*Dice(8), 2, 1)
-WeaponType("spear", 15, Dice(20), 8, 2)
-WeaponType("war hammer", 20, 4*Dice(6), 0, 1)
-WeaponType("great hammer", 45, 4*Dice(8), 2, 2)
-WeaponType("war axe", 20, 3*Dice(6)+2, 2, 1)
-WeaponType("great axe", 40, 3*Dice(8)+2, 2, 2)
-WeaponType("halberd", 50, 2*Dice(12), 10, 2)
+world.new_weapon_type("arming sword", 10, 2*Dice(10), 6, 1)
+world.new_weapon_type("scimitar", 10, 3*Dice(6)+1, 5, 1)
+world.new_weapon_type("long sword", 20, 2*Dice(12), 6, 2)
+world.new_weapon_type("short sword", 5, 2*Dice(8), 4, 1)
+world.new_weapon_type("dagger", 2, 2*Dice(8), 2, 1)
+world.new_weapon_type("spear", 15, Dice(20), 8, 2)
+world.new_weapon_type("war hammer", 20, 4*Dice(6), 0, 1)
+world.new_weapon_type("great hammer", 45, 4*Dice(8), 2, 2)
+world.new_weapon_type("war axe", 20, 3*Dice(6)+2, 2, 1)
+world.new_weapon_type("great axe", 40, 3*Dice(8)+2, 2, 2)
+world.new_weapon_type("halberd", 50, 2*Dice(12), 10, 2)
 
+world.new_enchantment("eagle %s", [ModifyAttributeEffect("perception", 10)])
+world.new_enchantment("wise %s", [ModifyAttributeEffect("intelligence", 10)])
+world.new_enchantment("conduit %s", [ModifyAttributeEffect("magic", 5)])
+world.new_enchantment("elven %s", [ModifyAttributeEffect("magic", 10)])
+world.new_enchantment("defender %s", [ModifyAttributeEffect("defence", 5)])
+world.new_enchantment("aggressive %s", [ModifyAttributeEffect("offence", 5)])
+world.new_enchantment("cat %s", [ModifyAttributeEffect("agility", 5)])
+world.new_enchantment("crafting %s", [ModifyAttributeEffect("dexterity", 10)])
+world.new_enchantment("bull %s", [ModifyAttributeEffect("max health", 50)])
+world.new_enchantment("orc %s", [ModifyAttributeEffect("strength", 10)])
+world.new_enchantment("ogre %s", [ModifyAttributeEffect("strength", 20)])
+world.new_enchantment("shielding %s", [ModifyAttributeEffect("shielding", Dice(6))])
+world.new_enchantment("warrior %s", [ModifyAttributeEffect("defence", 5), ModifyAttributeEffect("offence", 5)])
+world.new_enchantment("berserk %s", [ModifyAttributeEffect("defence", -5), ModifyAttributeEffect("offence", 10)])
 
-Enchantment("eagle %s", [ModifyAttributeEffect("perception", 10)])
-Enchantment("wise %s", [ModifyAttributeEffect("intelligence", 10)])
-Enchantment("conduit %s", [ModifyAttributeEffect("magic", 5)])
-Enchantment("elven %s", [ModifyAttributeEffect("magic", 10)])
-Enchantment("defender %s", [ModifyAttributeEffect("defence", 5)])
-Enchantment("aggressive %s", [ModifyAttributeEffect("offence", 5)])
-Enchantment("cat %s", [ModifyAttributeEffect("agility", 5)])
-Enchantment("crafting %s", [ModifyAttributeEffect("dexterity", 10)])
-Enchantment("bull %s", [ModifyAttributeEffect("max health", 50)])
-Enchantment("orc %s", [ModifyAttributeEffect("strength", 10)])
-Enchantment("ogre %s", [ModifyAttributeEffect("strength", 20)])
-Enchantment("shielding %s", [ModifyAttributeEffect("shielding", Dice(6))])
-Enchantment("warrior %s", [ModifyAttributeEffect("defence", 5), ModifyAttributeEffect("offence", 5)])
-Enchantment("berserk %s", [ModifyAttributeEffect("defence", -5), ModifyAttributeEffect("offence", 10)])
-
-
-Race("human", max_health=5*Dice(8)+40, stamina=5*Dice(10)+50, magic=attr_base(4),
-     strength=attr_base(6), agility=attr_base(6), dexterity=attr_base(10), intelligence=attr_base(10),
-     perception=attr_base(6), armor=Dice(2), damage=Dice(4))
-Race("goblin", max_health=5*Dice(6)+30, stamina=5*Dice(10)+40, magic=attr_base(4),
-     strength=attr_base(4), agility=attr_base(7), dexterity=attr_base(10), intelligence=attr_base(8),
-     perception=attr_base(6), armor=Dice(6), damage=2*Dice(4))
-Race("bear", max_health=5*Dice(12)+60, stamina=5*Dice(8)+40, magic=Dice(2),
-     strength=attr_base(12), agility=attr_base(8), dexterity=attr_base(2), intelligence=attr_base(4),
-     perception=attr_base(6), armor=Dice(6)+3, damage=2*Dice(10))
+world.new_race("human", max_health=5*Dice(8)+40, stamina=5*Dice(10)+50, magic=attr_base(4),
+               strength=attr_base(6), agility=attr_base(6), dexterity=attr_base(10), intelligence=attr_base(10),
+               perception=attr_base(6), armor=Dice(2), damage=Dice(4))
+world.new_race("goblin", max_health=5*Dice(6)+30, stamina=5*Dice(10)+40, magic=attr_base(4),
+               strength=attr_base(4), agility=attr_base(7), dexterity=attr_base(10), intelligence=attr_base(8),
+               perception=attr_base(6), armor=Dice(6), damage=2*Dice(4))
+world.new_race("bear", max_health=5*Dice(12)+60, stamina=5*Dice(8)+40, magic=Dice(2),
+               strength=attr_base(12), agility=attr_base(8), dexterity=attr_base(2), intelligence=attr_base(4),
+               perception=attr_base(6), armor=Dice(6)+3, damage=2*Dice(10))
 
 
 fred = Character(race="human", name="Fred", hero=True)
