@@ -21,12 +21,14 @@ class World:
         self.__enchantments = dict()
         self.__races = dict()
         self.__weapon_types = dict()
+        self.__locations = list()
 
     def new_race(self, name, max_health, stamina, magic, strength, agility, dexterity, intelligence, perception,
                  armor, damage):
         r = Race(name, max_health, stamina, magic, strength, agility, dexterity, intelligence, perception,
                  armor, damage)
         self.__races.update({name: r})
+        return r
 
     def races(self):
         return self.__races
@@ -37,6 +39,7 @@ class World:
     def new_enchantment(self, name, effects):
         e = Enchantment(name, effects)
         self.__enchantments.update({name: e})
+        return e
 
     def enchantments(self):
         return self.__enchantments
@@ -53,6 +56,7 @@ class World:
     def new_weapon_type(self, name, weight, damage_dice, offence, hands):
         wt = WeaponType(name, weight, damage_dice, offence, hands)
         self.__weapon_types.update({name: wt})
+        return wt
 
     def weapon_types(self):
         return self.__weapon_types
@@ -60,8 +64,84 @@ class World:
     def weapon_type(self, name):
         return self.__weapon_types[name]
 
+    def new_location(self, name, description, obscured=False):
+        l = Location(name, description, obscured)
+        self.__locations.append(l)
+        return l
+
+    def location(self, num):
+        return self.__locations[num]
+
+    def start(self):
+        result = Character(race="human", name="Protagonist", hero=True)
+        result.move(self.location(0))
+        return result
+
 
 world = World()
+
+
+class Location:
+    def __init__(self, name, description, obscured):
+        self.__name = name
+        self.__description = description
+        self.__items = list()
+        self.__characters = list()
+        self.__exits = dict()
+        self.__obscured = obscured
+
+    def name(self):
+        return self.__name
+
+    def description(self):
+        return self.__description
+
+    def items(self):
+        return self.__items
+
+    def add_item(self, i):
+        self.__characters.append(i)
+
+    def remove_item(self, i):
+        self.__characters.remove(i)
+
+    def characters(self):
+        return self.__characters
+
+    def add_character(self, c):
+        self.__characters.append(c)
+
+    def remove_character(self, c):
+        self.__characters.remove(c)
+
+    def exits(self):
+        return self.__exits
+
+    def add_exit(self, direction, exit_loc, back_direction=None):
+        self.__exits.update({direction: exit_loc})
+        if back_direction is not None:
+            exit_loc.add_exit(back_direction, self)
+
+    def exit(self, exit_name):
+        return self.__exits[exit_name]
+
+    def describe(self, inside=True):
+        if not inside and self.__obscured:
+            result = "Your can't see anything!"
+        else:
+            if inside:
+                result = "You are in the "+self.__name
+            else:
+                result = "You see the "+self.__name
+            result += "\n" + self.__description
+            if inside:
+                if self.items():  # not empty
+                    result += "\nItems: " + (", ".join([i.name() for i in self.items()]))
+            if self.characters():  # not empty
+                result += "\nCharacters: " + (", ".join([c.name() for c in self.characters()]))
+            if inside:
+                result += "\nExits: " + (", ".join(self.exits().keys()))
+        return result
 
 
 # Alle objecten op de wereld
@@ -99,6 +179,7 @@ class Character(WorldObject):
         self.__effects = list()
         self.__items = set()
         self.__hero = hero
+        self.__location = None
 
     def __str__(self):
         result = self.name() + " (" + self.__race.name()
@@ -211,6 +292,18 @@ class Character(WorldObject):
                 print(self.name(), "attacks", other.name(), "and hits, but fails to do damage")
         else:
             print(self.name(), "attacks", other.name(), "but misses")
+
+    def move(self, location):
+        if self.__location is not None:
+            self.__location.remove_character(self)
+        location.add_character(self)
+        self.__location = location
+
+    def location(self):
+        return self.__location
+
+    def is_alive(self):
+        return self.health() - self.wounds() > 0
 
 
 class Race:
@@ -344,9 +437,10 @@ class Ring(Item):
 
 
 class Weapon(Item):
-    def __init__(self, name, enchantments=None):
-        wt = world.weapon_type(name)
-        weight, damage_dice, offence, hands = wt.stats()
+    def __init__(self, name, weight=None, damage_dice=None, offence=None, hands=None, enchantments=None):
+        if weight is None or damage_dice is None or offence is None or hands is None:
+            wt = world.weapon_type(name)
+            weight, damage_dice, offence, hands = wt.stats()
         effects = [ReplaceAttributeEffect("damage", damage_dice)]
         if offence > 0:
             effects.append(ModifyAttributeEffect("offence", offence))
@@ -468,53 +562,66 @@ world.new_race("bear", max_health=5*Dice(12)+60, stamina=5*Dice(8)+40, magic=Dic
                strength=attr_base(12), agility=attr_base(8), dexterity=attr_base(2), intelligence=attr_base(4),
                perception=attr_base(6), armor=Dice(6)+3, damage=2*Dice(10))
 
-
-fred = Character(race="human", name="Fred", hero=True)
-print(fred)
-
-bear1 = Character(race="bear")
-print(bear1)
-
-g = Character(race="goblin")
-print(g)
-
-print(fred.name(), "has max_health: ", fred.max_health(), "and wounds:", fred.wounds(), "health is ", fred.health())
-
-i = Item("Max health potion", 1, consumable=True, effects=[ModifyAttributeEffect("max_health", +50)])
-fred.acquire(i)
-fred.consume(i)
-print(fred.name(), "has max_health: ", fred.max_health(), "and wounds:", fred.wounds(), "health is ", fred.health())
-
-fred.add_effect(damage_effect(25))
-print(fred.name(), "has max_health: ", fred.max_health(), "and wounds:", fred.wounds(), "health is ", fred.health())
-
-i2 = Item("Healing potion", 1, consumable=True, effects=[healing_effect(50)])
-fred.acquire(i2)
-fred.consume(i2)
-print(fred.name(), "has max_health: ", fred.max_health(), "and wounds:", fred.wounds(), "health is ", fred.health())
+start = world.new_location("inn's saloon", "The main room of the adventurer's inn: the saloon.")
+main_street = world.new_location("iain street", "The downtown main street is a busy place.")
+kitchen = world.new_location("inn's kitchen", "The inn's kitchen is a mess.")
+alley = world.new_location("brown alley", "The alley is filthy.")
+cellar = world.new_location("inn's cellar", "The cellar is a good training ground for beginning adventurers.",
+                            obscured=True)
+sleeping_room = world.new_location("sleeping room", "The innkeeper is your friend, you can sleep here for free.")
+start.add_exit("outside", main_street, "inn")
+start.add_exit("kitchen", kitchen, "saloon")
+start.add_exit("up", sleeping_room, "down")
+kitchen.add_exit("outside", alley, "inn")
+kitchen.add_exit("down", cellar, "up")
 
 
-print(fred.name(), "has magic: ", fred.magic())
-fred.add_effect(ModifyAttributeEffect("magic", -10))
-print(fred.name(), "has magic: ", fred.magic())
+def test():
+    fred = Character(race="human", name="Fred", hero=True)
+    print(fred)
 
-magic_sword = Weapon("arming sword").enchant()
-magic_ring = Ring().enchant()
-print("Fred found a", magic_sword, "and a", magic_ring)
-fred.acquire(magic_sword)
-fred.equip(magic_sword)
-fred.acquire(magic_ring)
-fred.equip(magic_ring)
-print(fred)
+    bear1 = Character(race="bear")
+    print(bear1)
 
-fred.attack(bear1)
-bear1.attack(fred)
-fred.attack(bear1)
-bear1.attack(fred)
-fred.attack(bear1)
-bear1.attack(fred)
+    g = Character(race="goblin")
+    print(g)
 
-# str = json.JSONEncoder().encode(c.as_dict())
-# copy_c = character_from_dict(json.JSONDecoder().decode(str))
-# print(copy_c.max_health())
-# print(copy_c.name())
+    print(fred.name(), "has max_health: ", fred.max_health(), "and wounds:", fred.wounds(), "health is ", fred.health())
+
+    i = Item("Max health potion", 1, consumable=True, effects=[ModifyAttributeEffect("max_health", +50)])
+    fred.acquire(i)
+    fred.consume(i)
+    print(fred.name(), "has max_health: ", fred.max_health(), "and wounds:", fred.wounds(), "health is ", fred.health())
+
+    fred.add_effect(damage_effect(25))
+    print(fred.name(), "has max_health: ", fred.max_health(), "and wounds:", fred.wounds(), "health is ", fred.health())
+
+    i2 = Item("Healing potion", 1, consumable=True, effects=[healing_effect(50)])
+    fred.acquire(i2)
+    fred.consume(i2)
+    print(fred.name(), "has max_health: ", fred.max_health(), "and wounds:", fred.wounds(), "health is ", fred.health())
+
+    print(fred.name(), "has magic: ", fred.magic())
+    fred.add_effect(ModifyAttributeEffect("magic", -10))
+    print(fred.name(), "has magic: ", fred.magic())
+
+    magic_sword = Weapon("arming sword").enchant()
+    magic_ring = Ring().enchant()
+    print("Fred found a", magic_sword, "and a", magic_ring)
+    fred.acquire(magic_sword)
+    fred.equip(magic_sword)
+    fred.acquire(magic_ring)
+    fred.equip(magic_ring)
+    print(fred)
+
+    fred.attack(bear1)
+    bear1.attack(fred)
+    fred.attack(bear1)
+    bear1.attack(fred)
+    fred.attack(bear1)
+    bear1.attack(fred)
+
+    # str = json.JSONEncoder().encode(c.as_dict())
+    # copy_c = character_from_dict(json.JSONDecoder().decode(str))
+    # print(copy_c.max_health())
+    # print(copy_c.name())
