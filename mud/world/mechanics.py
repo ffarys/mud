@@ -83,3 +83,41 @@ def test():
     bunch = 3 * Dice(6) + 2 * Dice(4) + 2
     print(bunch)
     print(bunch.range_string())
+
+
+def noun_with_article(word):
+    result = str(word)
+    if result[0] in ['a', 'e', 'i', 'o', 'u']:
+        result = "an " + result
+    else:
+        result = "a " + result
+    return result
+
+
+ordinals = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eight", "ninth", "tenth", "eleventh",
+            "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth"]
+
+
+def pick(a_list, ordinal):
+    if ordinal in ordinals:
+        index = ordinals.index(ordinal)
+        if index < len(a_list):
+            return a_list[index]
+        else:
+            return None
+    else:
+        return None
+
+
+def is_ordinal(ordinal):
+    return ordinal in ordinals
+
+
+def ordinal_and_name(words):
+    if len(words) > 2 and is_ordinal(words[1]):
+        ordinal = words[1]
+        name = " ".join(words[2:])
+    else:
+        ordinal = "first"
+        name = " ".join(words[1:])
+    return ordinal, name

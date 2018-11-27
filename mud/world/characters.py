@@ -1,6 +1,6 @@
 import json
 import random
-from mud.world.mechanics import Dice, contest, attr_base
+from mud.world.mechanics import Dice, contest, attr_base, noun_with_article
 
 
 attributes = ["max_health",    # max amount to take damage
@@ -48,7 +48,7 @@ class World:
         if name != '?':
             result = self.__enchantments[name]
             if result is None:
-                raise ValueError("unknown enchantemen name: " + str(result))
+                raise ValueError("unknown enchantement name: " + str(result))
         else:
             result = random.choice(list(self.__enchantments.values()))
         return result
@@ -72,8 +72,10 @@ class World:
     def location(self, num):
         return self.__locations[num]
 
-    def start(self):
+    def spawn_player(self):
         result = Character(race="human", name="Protagonist", hero=True)
+        result.acquire(Weapon("club"))
+        result.acquire(Weapon("dagger"))
         result.move(self.location(0))
         return result
 
@@ -81,12 +83,33 @@ class World:
 world = World()
 
 
-class Location:
+class Container:
+    def __init__(self):
+        self.__items = list()  # we want to retain order
+
+    def add_item(self, item):
+        if item not in self.__items:
+            self.__items.append(item)
+
+    def remove_item(self, item):
+        self.__items.remove(item)
+
+    def items(self):
+        return self.__items
+
+    def contains_item(self, item):
+        return item in self.__items
+
+    def items_named(self, name):
+        return [c for c in self.__items if c.name() == name]
+
+
+class Location(Container):
     def __init__(self, name, description, obscured):
+        Container.__init__(self)
         self.__name = name
         self.__description = description
-        self.__items = list()
-        self.__characters = list()
+        self.__characters = list()  # we want to retain order
         self.__exits = dict()
         self.__obscured = obscured
 
@@ -96,23 +119,18 @@ class Location:
     def description(self):
         return self.__description
 
-    def items(self):
-        return self.__items
-
-    def add_item(self, i):
-        self.__characters.append(i)
-
-    def remove_item(self, i):
-        self.__characters.remove(i)
-
     def characters(self):
         return self.__characters
 
     def add_character(self, c):
-        self.__characters.append(c)
+        if c not in self.__characters:
+            self.__characters.append(c)
 
     def remove_character(self, c):
         self.__characters.remove(c)
+
+    def characters_named(self, name):
+        return [c for c in self.__characters if c.name() == name or c.race().name() == name]
 
     def exits(self):
         return self.__exits
@@ -127,20 +145,20 @@ class Location:
 
     def describe(self, inside=True):
         if not inside and self.__obscured:
-            result = "Your can't see anything!"
+            result = ["Your can't see anything!"]
         else:
             if inside:
-                result = "You are in the "+self.__name
+                result = ["You are in the "+self.__name]
             else:
-                result = "You see the "+self.__name
-            result += "\n" + self.__description
+                result = ["You see the "+self.__name]
+            result.append(self.__description)
             if inside:
                 if self.items():  # not empty
-                    result += "\nItems: " + (", ".join([i.name() for i in self.items()]))
+                    result.append("Items: " + (", ".join([i.name() for i in self.items()])))
             if self.characters():  # not empty
-                result += "\nCharacters: " + (", ".join([c.name() for c in self.characters()]))
+                result.append("Characters: " + (", ".join([c.name() for c in self.characters()])))
             if inside:
-                result += "\nExits: " + (", ".join(self.exits().keys()))
+                result.append("Exits: " + (", ".join(self.exits().keys())))
         return result
 
 
@@ -156,7 +174,7 @@ class WorldObject:
         self.__name = name
 
 
-class Character(WorldObject):
+class Character(WorldObject, Container):
     def __init__(self, race, name=None, max_health=None, stamina=None, magic=None, strength=None,
                  agility=None, dexterity=None, intelligence=None, perception=None, armor=None,
                  damage=None, wounds=0, hero=False):
@@ -164,7 +182,8 @@ class Character(WorldObject):
             self.__race = race
         else:
             self.__race = world.race(race)
-        super().__init__(self.__race.default_name() if name is None else name)
+        WorldObject.__init__(self, self.__race.default_name() if name is None else name)
+        Container.__init__(self)
         self.__attributes = {"max_health":   self.__race.roll_max_health(hero) if max_health is None else max_health,
                              "stamina":      self.__race.roll_stamina(hero) if stamina is None else stamina,
                              "magic":        self.__race.roll_magic(hero) if magic is None else magic,
@@ -177,9 +196,9 @@ class Character(WorldObject):
                              "armor":        self.__race.armor() if armor is None else armor,
                              "damage":       self.__race.damage() if damage is None else damage}
         self.__effects = list()
-        self.__items = set()
         self.__hero = hero
         self.__location = None
+        self.__left_world = False
 
     def __str__(self):
         result = self.name() + " (" + self.__race.name()
@@ -231,6 +250,9 @@ class Character(WorldObject):
     def armor(self):
         return self.attribute("armor")
 
+    def race(self):
+        return self.__race
+
     def add_effect(self, effect):
         if effect.permanent():
             for attr in attributes:
@@ -253,34 +275,53 @@ class Character(WorldObject):
         return result
 
     def acquire(self, item):
-        self.__items.add(item)
+        self.add_item(item)
 
     def drop(self, item):
-        if item in self.__items:
+        if item in self.items():
             if item.is_equipped():
                 self.unequip(item)
-            self.__items.remove(item)
+            self.remove_item(item)
 
     def consume(self, item):
-        if item in self.__items:
+        if item in self.items():
             if item.consumable():
                 self.drop(item)
                 for e in item.effects():
                     self.add_effect(e)
 
     def equip(self, item):
-        if item in self.__items:
+        if item in self.items():
             if item.equippable():
                 item.set_equipped(True)
                 for e in item.effects():
                     self.add_effect(e)
 
     def unequip(self, item):
-        if item in self.__items:
+        if item in self.items():
             if item.is_equipped():
                 item.set_equipped(False)
                 for e in item.effects():
                     self.remove_effect(e)
+
+    def equipped_weapon(self):
+        result = None
+        for i in self.items():
+            if type(i) is Weapon and i.is_equipped():
+                result = i
+        return result
+
+    def describe(self, everything=False):
+        heading = "You see "+noun_with_article(self.__race.name())+" named '"+self.name()+"'"
+        w = self.equipped_weapon()
+        if w is not None:
+            heading += " armed with " + noun_with_article(w.weapon_type())
+        result = [heading]
+        if everything:
+            result.append("; ".join([a + " " + str(self.attribute(a)) for a in attributes]))
+            if self.items():
+                result.append("Inventory: "+(", ".join([i.name() for i in self.items()])))
+        return result
 
     def attack(self, other):
         if contest(self.offence(), other.defence()):
@@ -304,6 +345,12 @@ class Character(WorldObject):
 
     def is_alive(self):
         return self.health() - self.wounds() > 0
+
+    def leave(self):
+        self.__left_world = True
+
+    def left_world(self):
+        return self.__left_world
 
 
 class Race:
@@ -355,12 +402,7 @@ class Race:
         return self.__damage
 
     def default_name(self):
-        result = self.name()
-        if result[0] in ['a', 'e', 'i', 'o', 'u']:
-            result = "an " + result
-        else:
-            result = "a " + result
-        return result
+        return noun_with_article(self.name())
 
 
 def character_from_dict(character_dict):
@@ -383,6 +425,7 @@ class Item(WorldObject):
         self.__weight = weight
         self.__effects = [] if effects is None else effects
         self.__equipped = False
+        self.__enchanted = False
         if enchantments is not None:
             for e in enchantments:
                 self.enchant(e)
@@ -402,6 +445,9 @@ class Item(WorldObject):
     def is_equipped(self):
         return self.__equipped
 
+    def is_enchanted(self):
+        return self.__enchanted
+
     def set_equipped(self, true_or_false):
         self.__equipped = true_or_false
 
@@ -412,7 +458,17 @@ class Item(WorldObject):
             enchantment = world.enchantment(enchantment)
         self.__effects = self.__effects + enchantment.effects()
         self.rename(enchantment.name() % self.name())
+        self.__enchanted = True
         return self
+
+    def describe(self, fully=True):
+        result = ["You see '" + self.__name + "'"]
+        if self.is_equipped():
+            result.append("It is equipped")
+        if fully:
+            if self.__enchanted:
+                result.append("It is enchanted")
+        return result
 
 
 class WeaponType:
@@ -422,7 +478,6 @@ class WeaponType:
         self.__damage_dice = damage_dice
         self.__offence = offence
         self.__hands = hands
-        world.weapon_types().update({name: self})
 
     def stats(self):
         return self.__weight, self.__damage_dice, self.__offence, self.__hands
@@ -437,15 +492,39 @@ class Ring(Item):
 
 
 class Weapon(Item):
-    def __init__(self, name, weight=None, damage_dice=None, offence=None, hands=None, enchantments=None):
+    def __init__(self, weapon_type, name=None, weight=None, damage_dice=None, offence=None, hands=None,
+                 enchantments=None):
+        self.__weapon_type = weapon_type
         if weight is None or damage_dice is None or offence is None or hands is None:
-            wt = world.weapon_type(name)
+            wt = world.weapon_type(weapon_type)
             weight, damage_dice, offence, hands = wt.stats()
+            name = weapon_type
         effects = [ReplaceAttributeEffect("damage", damage_dice)]
         if offence > 0:
             effects.append(ModifyAttributeEffect("offence", offence))
         super().__init__(name, weight, equippable=True, effects=effects, enchantments=enchantments)
         self.__hands = hands
+        self.__weapon_type = weapon_type
+        self.__offence = offence
+        self.__damage_dice = damage_dice
+
+    def weapon_type(self):
+        return self.__weapon_type
+
+    def describe(self, fully=True):
+        if self.name() == self.__weapon_type:
+            result = ["You see " + noun_with_article(self.name())]
+        else:
+            result = ["You see '"+self.name()+"', which is a "+noun_with_article(self.__weapon_type)]
+        if self.is_equipped():
+            result.append("It is equipped")
+        if fully:
+            result.append(("It is one handed" if self.__hands == 1 else "It is two handed")
+                          + "; base offence bonus: "+str(self.__offence)
+                          + "; base damage: "+self.__damage_dice.range_string())
+            if self.is_enchanted():
+                result.append("It is enchanted")
+        return result
 
 
 class Effect:
@@ -529,13 +608,14 @@ world.new_weapon_type("arming sword", 10, 2*Dice(10), 6, 1)
 world.new_weapon_type("scimitar", 10, 3*Dice(6)+1, 5, 1)
 world.new_weapon_type("long sword", 20, 2*Dice(12), 6, 2)
 world.new_weapon_type("short sword", 5, 2*Dice(8), 4, 1)
-world.new_weapon_type("dagger", 2, 2*Dice(8), 2, 1)
+world.new_weapon_type("dagger", 2, 2*Dice(6), 2, 1)
 world.new_weapon_type("spear", 15, Dice(20), 8, 2)
 world.new_weapon_type("war hammer", 20, 4*Dice(6), 0, 1)
 world.new_weapon_type("great hammer", 45, 4*Dice(8), 2, 2)
 world.new_weapon_type("war axe", 20, 3*Dice(6)+2, 2, 1)
 world.new_weapon_type("great axe", 40, 3*Dice(8)+2, 2, 2)
 world.new_weapon_type("halberd", 50, 2*Dice(12), 10, 2)
+world.new_weapon_type("club", 15, 3*Dice(4)+2, 0, 1)
 
 world.new_enchantment("eagle %s", [ModifyAttributeEffect("perception", 10)])
 world.new_enchantment("wise %s", [ModifyAttributeEffect("intelligence", 10)])
@@ -555,6 +635,9 @@ world.new_enchantment("berserk %s", [ModifyAttributeEffect("defence", -5), Modif
 world.new_race("human", max_health=5*Dice(8)+40, stamina=5*Dice(10)+50, magic=attr_base(4),
                strength=attr_base(6), agility=attr_base(6), dexterity=attr_base(10), intelligence=attr_base(10),
                perception=attr_base(6), armor=Dice(2), damage=Dice(4))
+world.new_race("muskrat", max_health=5*Dice(4)+10, stamina=5*Dice(8)+40, magic=attr_base(1),
+               strength=attr_base(2), agility=attr_base(6), dexterity=attr_base(2), intelligence=attr_base(2),
+               perception=attr_base(8), armor=Dice(2), damage=2*Dice(4))
 world.new_race("goblin", max_health=5*Dice(6)+30, stamina=5*Dice(10)+40, magic=attr_base(4),
                strength=attr_base(4), agility=attr_base(7), dexterity=attr_base(10), intelligence=attr_base(8),
                perception=attr_base(6), armor=Dice(6), damage=2*Dice(4))
@@ -568,6 +651,8 @@ kitchen = world.new_location("inn's kitchen", "The inn's kitchen is a mess.")
 alley = world.new_location("brown alley", "The alley is filthy.")
 cellar = world.new_location("inn's cellar", "The cellar is a good training ground for beginning adventurers.",
                             obscured=True)
+cellar.add_character(Character("muskrat"))
+cellar.add_item(Weapon("short sword"))
 sleeping_room = world.new_location("sleeping room", "The innkeeper is your friend, you can sleep here for free.")
 start.add_exit("outside", main_street, "inn")
 start.add_exit("kitchen", kitchen, "saloon")
@@ -607,7 +692,7 @@ def test():
 
     magic_sword = Weapon("arming sword").enchant()
     magic_ring = Ring().enchant()
-    print("Fred found a", magic_sword, "and a", magic_ring)
+    print("Fred found", noun_with_article(magic_sword), "and", noun_with_article(magic_ring))
     fred.acquire(magic_sword)
     fred.equip(magic_sword)
     fred.acquire(magic_ring)
