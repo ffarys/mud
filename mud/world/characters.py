@@ -3,17 +3,18 @@ import random
 from mud.world.mechanics import Dice, contest, attr_base, noun_with_article
 
 
-attributes = ["max_health",    # max amount to take damage
-              "stamina",       # resist exhaustion, disease
-              "magic",         # power of spells
-              "strength",      # damage done and soaked, carrying maximum
-              "agility",       # land and evade attacks, avoid traps, grace of movement
-              "dexterity",     # ability to do precise tasks (untie knot, open lock, sew, ...)
-              "intelligence",  # solving capacity
-              "perception",    # see, hear, smell things
-              "wounds",        # damage taken
-              "armor",         # soaks damage (Dice)
-              "damage"]        # natural weapon's damage
+attributes = ["max_health",      # max amount to take damage
+              "stamina",         # resist exhaustion, disease
+              "magic",           # power of spells
+              "strength",        # damage done and soaked, carrying maximum
+              "agility",         # land and evade attacks, avoid traps, grace of movement
+              "dexterity",       # ability to do precise tasks (untie knot, open lock, sew, ...)
+              "intelligence",    # solving capacity
+              "perception",      # see, hear, smell things
+              "wounds",          # damage taken
+              "armor",           # soaks damage (Dice)
+              "damage",          # natural weapon's damage
+              "aggressiveness"]  # percentile chance of attacking player
 
 
 class World:
@@ -24,9 +25,9 @@ class World:
         self.__locations = list()
 
     def new_race(self, name, max_health, stamina, magic, strength, agility, dexterity, intelligence, perception,
-                 armor, damage):
+                 armor, damage, aggressiveness):
         r = Race(name, max_health, stamina, magic, strength, agility, dexterity, intelligence, perception,
-                 armor, damage)
+                 armor, damage, aggressiveness)
         self.__races.update({name: r})
         return r
 
@@ -73,7 +74,7 @@ class World:
         return self.__locations[num]
 
     def spawn_player(self):
-        result = Character(race="human", name="Protagonist", hero=True)
+        result = Character(race="human", name="Protagonist", hero=True, player_controlled=True)
         result.acquire(Weapon("club"))
         result.acquire(Weapon("dagger"))
         result.move(self.location(0))
@@ -177,34 +178,41 @@ class WorldObject:
 class Character(WorldObject, Container):
     def __init__(self, race, name=None, max_health=None, stamina=None, magic=None, strength=None,
                  agility=None, dexterity=None, intelligence=None, perception=None, armor=None,
-                 damage=None, wounds=0, hero=False):
+                 damage=None, aggressiveness=None, wounds=0, hero=False, player_controlled=False):
         if type(race) is Race:
             self.__race = race
         else:
             self.__race = world.race(race)
         WorldObject.__init__(self, self.__race.default_name() if name is None else name)
         Container.__init__(self)
-        self.__attributes = {"max_health":   self.__race.roll_max_health(hero) if max_health is None else max_health,
-                             "stamina":      self.__race.roll_stamina(hero) if stamina is None else stamina,
-                             "magic":        self.__race.roll_magic(hero) if magic is None else magic,
-                             "wounds":       wounds,
-                             "strength":     self.__race.roll_strength(hero) if strength is None else strength,
-                             "agility":      self.__race.roll_agility(hero) if agility is None else agility,
-                             "dexterity":    self.__race.roll_dexterity(hero) if dexterity is None else dexterity,
-                             "intelligence": self.__race.roll_intelligence(hero) if intelligence is None else intelligence,
-                             "perception":   self.__race.roll_perception(hero) if perception is None else perception,
-                             "armor":        self.__race.armor() if armor is None else armor,
-                             "damage":       self.__race.damage() if damage is None else damage}
+        self.__attributes = \
+                {"max_health":     self.__race.roll_max_health(hero) if max_health is None else max_health,
+                 "stamina":        self.__race.roll_stamina(hero) if stamina is None else stamina,
+                 "magic":          self.__race.roll_magic(hero) if magic is None else magic,
+                 "wounds":         wounds,
+                 "strength":       self.__race.roll_strength(hero) if strength is None else strength,
+                 "agility":        self.__race.roll_agility(hero) if agility is None else agility,
+                 "dexterity":      self.__race.roll_dexterity(hero) if dexterity is None else dexterity,
+                 "intelligence":   self.__race.roll_intelligence(hero) if intelligence is None else intelligence,
+                 "perception":     self.__race.roll_perception(hero) if perception is None else perception,
+                 "armor":          self.__race.armor() if armor is None else armor,
+                 "damage":         self.__race.damage() if damage is None else damage,
+                 "aggressiveness": self.__race.aggressiveness() if aggressiveness is None else aggressiveness}
         self.__effects = list()
         self.__hero = hero
         self.__location = None
         self.__left_world = False
+        self.__hostile = False
+        self.__player_controlled = player_controlled
 
     def __str__(self):
         result = self.name() + " (" + self.__race.name()
         for a in attributes:
             result += ", "+a+": "+str(self.attribute(a))
-        return result + ")"
+        result += ")"
+        if not self.is_alive():
+            result = "dead " + result
+        return result
 
     def attribute(self, attr, bonus=None):
         value = self.__attributes[attr]
@@ -252,6 +260,9 @@ class Character(WorldObject, Container):
 
     def race(self):
         return self.__race
+
+    def aggressiveness(self):
+        return self.attribute("aggressiveness")
 
     def add_effect(self, effect):
         if effect.permanent():
@@ -321,18 +332,25 @@ class Character(WorldObject, Container):
             result.append("; ".join([a + " " + str(self.attribute(a)) for a in attributes]))
             if self.items():
                 result.append("Inventory: "+(", ".join([i.name() for i in self.items()])))
+        if self.is_hostile():
+            result.append("Watch out: the "+self.__race.name()+" is hostile!")
         return result
 
     def attack(self, other):
         if contest(self.offence(), other.defence()):
             damage_done = self.damage().roll() + self.strength() // 2 - other.armor().roll()
             if damage_done > 0:
-                print(self.name(), "attacks", other.name(), "and hits, damage:", damage_done)
+                result = [self.name() + " attacks " + other.name() + "and hits, damage:" + str(damage_done)]
                 other.add_effect(damage_effect(damage_done))
+                if not other.is_alive():
+                    result.append(other.name() + " is dead!")
             else:
-                print(self.name(), "attacks", other.name(), "and hits, but fails to do damage")
+                result = [self.name() + " attacks " + other.name() + " and hits, but fails to do damage"]
         else:
-            print(self.name(), "attacks", other.name(), "but misses")
+            result = [self.name() + " attacks " + other.name() + " but misses"]
+        if self.__player_controlled:
+            self.set_hostile(True)
+        return result
 
     def move(self, location):
         if self.__location is not None:
@@ -344,7 +362,7 @@ class Character(WorldObject, Container):
         return self.__location
 
     def is_alive(self):
-        return self.health() - self.wounds() > 0
+        return self.health() > 0
 
     def leave(self):
         self.__left_world = True
@@ -352,10 +370,16 @@ class Character(WorldObject, Container):
     def left_world(self):
         return self.__left_world
 
+    def is_hostile(self):
+        return self.__hostile
+
+    def set_hostile(self, hostile):
+        self.__hostile = not self.__player_controlled and hostile
+
 
 class Race:
     def __init__(self, name, max_health, stamina, magic, strength, agility, dexterity, intelligence, perception,
-                 armor, damage):
+                 armor, damage, aggressiveness):
         self.__name = name
         self.__max_health = max_health
         self.__stamina = stamina
@@ -367,6 +391,7 @@ class Race:
         self.__magic = magic
         self.__armor = armor
         self.__damage = damage
+        self.__aggressiveness = aggressiveness
 
     def name(self):
         return self.__name
@@ -394,6 +419,9 @@ class Race:
 
     def roll_perception(self, heroic=False):
         return self.__perception.roll_best_of(2 if heroic else 1)
+
+    def aggressiveness(self):
+        return self.__aggressiveness
 
     def armor(self):
         return self.__armor
@@ -479,6 +507,18 @@ class WeaponType:
         self.__offence = offence
         self.__hands = hands
 
+    def weight(self):
+        return self.__weight
+
+    def damage_dice(self):
+        return self.__damage_dice
+
+    def offence(self):
+        return self.__offence
+
+    def hands(self):
+        return self.__hands
+
     def stats(self):
         return self.__weight, self.__damage_dice, self.__offence, self.__hands
 
@@ -495,18 +535,16 @@ class Weapon(Item):
     def __init__(self, weapon_type, name=None, weight=None, damage_dice=None, offence=None, hands=None,
                  enchantments=None):
         self.__weapon_type = weapon_type
-        if weight is None or damage_dice is None or offence is None or hands is None:
-            wt = world.weapon_type(weapon_type)
-            weight, damage_dice, offence, hands = wt.stats()
-            name = weapon_type
-        effects = [ReplaceAttributeEffect("damage", damage_dice)]
-        if offence > 0:
-            effects.append(ModifyAttributeEffect("offence", offence))
-        super().__init__(name, weight, equippable=True, effects=effects, enchantments=enchantments)
-        self.__hands = hands
+        wt = world.weapon_type(weapon_type)
+        self.__hands = wt.hands() if hands is None else hands
         self.__weapon_type = weapon_type
-        self.__offence = offence
-        self.__damage_dice = damage_dice
+        self.__offence = wt.offence() if offence is None else offence
+        self.__damage_dice = wt.damage_dice() if damage_dice is None else damage_dice
+        effects = [ReplaceAttributeEffect("damage", self.__damage_dice)]
+        if self.__offence > 0:
+            effects.append(ModifyAttributeEffect("offence", self.__offence))
+        super().__init__(weapon_type if name is None else name, wt.weight() if weight is None else weight,
+                         equippable=True, effects=effects, enchantments=enchantments)
 
     def weapon_type(self):
         return self.__weapon_type
@@ -634,16 +672,16 @@ world.new_enchantment("berserk %s", [ModifyAttributeEffect("defence", -5), Modif
 
 world.new_race("human", max_health=5*Dice(8)+40, stamina=5*Dice(10)+50, magic=attr_base(4),
                strength=attr_base(6), agility=attr_base(6), dexterity=attr_base(10), intelligence=attr_base(10),
-               perception=attr_base(6), armor=Dice(2), damage=Dice(4))
-world.new_race("muskrat", max_health=5*Dice(4)+10, stamina=5*Dice(8)+40, magic=attr_base(1),
+               perception=attr_base(6), armor=Dice(2), damage=Dice(4), aggressiveness=0)
+world.new_race("bloodrat", max_health=5*Dice(4)+10, stamina=5*Dice(8)+40, magic=attr_base(1),
                strength=attr_base(2), agility=attr_base(6), dexterity=attr_base(2), intelligence=attr_base(2),
-               perception=attr_base(8), armor=Dice(2), damage=2*Dice(4))
+               perception=attr_base(8), armor=Dice(2), damage=2*Dice(4), aggressiveness=100)
 world.new_race("goblin", max_health=5*Dice(6)+30, stamina=5*Dice(10)+40, magic=attr_base(4),
                strength=attr_base(4), agility=attr_base(7), dexterity=attr_base(10), intelligence=attr_base(8),
-               perception=attr_base(6), armor=Dice(6), damage=2*Dice(4))
+               perception=attr_base(6), armor=Dice(6), damage=2*Dice(4), aggressiveness=90)
 world.new_race("bear", max_health=5*Dice(12)+60, stamina=5*Dice(8)+40, magic=Dice(2),
                strength=attr_base(12), agility=attr_base(8), dexterity=attr_base(2), intelligence=attr_base(4),
-               perception=attr_base(6), armor=Dice(6)+3, damage=2*Dice(10))
+               perception=attr_base(6), armor=Dice(6)+3, damage=2*Dice(10), aggressiveness=20)
 
 start = world.new_location("inn's saloon", "The main room of the adventurer's inn: the saloon.")
 main_street = world.new_location("iain street", "The downtown main street is a busy place.")
@@ -651,7 +689,7 @@ kitchen = world.new_location("inn's kitchen", "The inn's kitchen is a mess.")
 alley = world.new_location("brown alley", "The alley is filthy.")
 cellar = world.new_location("inn's cellar", "The cellar is a good training ground for beginning adventurers.",
                             obscured=True)
-cellar.add_character(Character("muskrat"))
+cellar.add_character(Character("bloodrat"))
 cellar.add_item(Weapon("short sword"))
 sleeping_room = world.new_location("sleeping room", "The innkeeper is your friend, you can sleep here for free.")
 start.add_exit("outside", main_street, "inn")
@@ -699,12 +737,12 @@ def test():
     fred.equip(magic_ring)
     print(fred)
 
-    fred.attack(bear1)
-    bear1.attack(fred)
-    fred.attack(bear1)
-    bear1.attack(fred)
-    fred.attack(bear1)
-    bear1.attack(fred)
+    print(fred.attack(bear1))
+    print(bear1.attack(fred))
+    print(fred.attack(bear1))
+    print(bear1.attack(fred))
+    print(fred.attack(bear1))
+    print(bear1.attack(fred))
 
     # str = json.JSONEncoder().encode(c.as_dict())
     # copy_c = character_from_dict(json.JSONDecoder().decode(str))

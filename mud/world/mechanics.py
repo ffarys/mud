@@ -122,3 +122,7 @@ def ordinal_and_name(words):
         ordinal = "first"
         name = " ".join(words[1:])
     return ordinal, name
+
+
+def percent_roll(n):
+    return n >= randint(1, 100)
