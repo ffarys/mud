@@ -74,9 +74,10 @@ def attr_base(num):
     return 2*Dice(num) + num
 
 
-def contest(attribute, difficulty):
-    roll = Dice(20).roll()
-    return roll == 20 or (roll != 1 and roll + attribute - 10 > difficulty)
+def contest(attribute, difficulty, dice=Dice(20)):
+    min_roll, max_roll = dice.range()
+    roll = dice.roll()
+    return roll == max_roll or (roll != min_roll and roll + attribute - ((min_roll + max_roll) // 2) > difficulty)
 
 
 def test():
