@@ -72,14 +72,28 @@ def look(words, protagonist):
 
 def equip(words, protagonist):
     ordinal, name = ordinal_and_name(words)
-    items = protagonist.location().items_named(name)
+    items = protagonist.items_named(name)
     if len(items) > 0:
         item = pick(items, ordinal)
         if item is None:
-            return ["Can't find " + ordinal + " " + name]
+            return ["Can't find " + ordinal + " " + name + " (must be in your possession)"]
         else:
             protagonist.equip(item)
             return ["You equipped " + name]
+    else:
+        return ["Can't find " + words[1]]
+
+
+def drop(words, protagonist):
+    ordinal, name = ordinal_and_name(words)
+    items = protagonist.items_named(name)
+    if len(items) > 0:
+        item = pick(items, ordinal)
+        if item is None:
+            return ["Can't find " + ordinal + " " + name + " (must be in your possession)"]
+        else:
+            protagonist.drop(item)
+            return ["You dropped " + name]
     else:
         return ["Can't find " + words[1]]
 
@@ -125,9 +139,22 @@ def take(words, protagonist):
         return ["Can't find " + name]
 
 
+def attack(words, protagonist):
+    ordinal, name = ordinal_and_name(words)
+    creatures = protagonist.location().characters_named(name)
+    if len(creatures) > 0:
+        creature = pick(creatures, ordinal)
+        if creature is None:
+            return ["Can't find " + ordinal + " " + name]
+        else:
+            return protagonist.attack(creature)
+    else:
+        return ["Can't find " + name]
+
+
 # all commands
 commands = [
-    Command("help", 0, 1,
+    Command("help", 0, 100,
             "help [{command}]    offers more help about a command", help_me),
     Command("quit", 0, 0,
             "quit                lets you quit the game", leave),
@@ -145,7 +172,11 @@ commands = [
             "inspect {something} inspects item or character named 'something'" 
             "(you may use ordinals: first, second, ...)", inspect),
     Command("take", 1, 100,
-            "take {something}    takes something in the room (you may use ordinals: first, second, ...)", take)
+            "take {something}    takes something in the room (you may use ordinals: first, second, ...)", take),
+    Command("attack", 1, 100,
+            "attack {something}  attacks a character in the room (you may use ordinals: first, second, ...)", attack),
+    Command("drop", 1, 100,
+            "drop {something}    drops an item in your possession (you may use ordinals: first, second, ...)", drop)
 ]
 
 

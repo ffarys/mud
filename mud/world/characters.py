@@ -85,8 +85,9 @@ world = World()
 
 
 class Container:
-    def __init__(self):
-        self.__items = list()  # we want to retain order
+    def __init__(self, items=None):
+        # een lijst want we willen de orde behouden (take first item, ...)
+        self.__items = list() if items is None else items
 
     def add_item(self, item):
         if item not in self.__items:
@@ -211,8 +212,11 @@ class Character(WorldObject, Container):
             result += ", "+a+": "+str(self.attribute(a))
         result += ")"
         if not self.is_alive():
-            result = "dead " + result
+            result = result + " [DEAD]"
         return result
+
+    def basic_attribute(self, attr):
+        return self.__attributes[attr]
 
     def attribute(self, attr, bonus=None):
         value = self.__attributes[attr]
@@ -293,6 +297,7 @@ class Character(WorldObject, Container):
             if item.is_equipped():
                 self.unequip(item)
             self.remove_item(item)
+            self.location().add_item(item)
 
     def consume(self, item):
         if item in self.items():
@@ -308,8 +313,15 @@ class Character(WorldObject, Container):
                 for e in item.effects():
                     self.add_effect(e)
 
-    def unequip(self, item):
-        if item in self.items():
+    def unequip(self, item=None):
+        if item is None:
+            # all items
+            for i in self.items():
+                if i.is_equipped():
+                    item.set_equipped(False)
+                    for e in item.effects():
+                        self.remove_effect(e)
+        elif item in self.items():
             if item.is_equipped():
                 item.set_equipped(False)
                 for e in item.effects():
@@ -340,8 +352,8 @@ class Character(WorldObject, Container):
         if contest(self.offence(), other.defence()):
             damage_done = self.damage().roll() + self.strength() // 2 - other.armor().roll()
             if damage_done > 0:
-                result = [self.name() + " attacks " + other.name() + "and hits, damage:" + str(damage_done)]
-                other.add_effect(damage_effect(damage_done))
+                result = [self.name() + " attacks " + other.name() + " and hits, damage:" + str(damage_done)]
+                other.receive_damage(damage_done)
                 if not other.is_alive():
                     result.append(other.name() + " is dead!")
             else:
@@ -349,8 +361,16 @@ class Character(WorldObject, Container):
         else:
             result = [self.name() + " attacks " + other.name() + " but misses"]
         if self.__player_controlled:
-            self.set_hostile(True)
+            other.set_hostile(True)
         return result
+
+    def receive_damage(self, damage_done):
+        alive = self.is_alive()
+        self.add_effect(damage_effect(damage_done))
+        if alive and not self.is_alive():  # died
+            self.unequip()
+            self.location().remove_character(self)
+            self.location().add_item(Corpse(self))
 
     def move(self, location):
         if self.__location is not None:
@@ -531,6 +551,19 @@ class Ring(Item):
                 self.enchant(e)
 
 
+class Corpse(Item, Container):
+    def __init__(self, creature):
+        Item.__init__(self, name="corpse of "+creature.name(), weight=creature.basic_attribute("max_health"))
+        Container.__init__(self, items=creature.items())
+        self.__creature = creature
+
+    def describe(self, fully=True):
+        result = ["You see "+self.name()]
+        if self.items():
+            result.append(["It holds: "+(", ".join(self.items()))])
+        return result
+
+
 class Weapon(Item):
     def __init__(self, weapon_type, name=None, weight=None, damage_dice=None, offence=None, hands=None,
                  enchantments=None):
@@ -675,7 +708,7 @@ world.new_race("human", max_health=5*Dice(8)+40, stamina=5*Dice(10)+50, magic=at
                perception=attr_base(6), armor=Dice(2), damage=Dice(4), aggressiveness=0)
 world.new_race("bloodrat", max_health=5*Dice(4)+10, stamina=5*Dice(8)+40, magic=attr_base(1),
                strength=attr_base(2), agility=attr_base(6), dexterity=attr_base(2), intelligence=attr_base(2),
-               perception=attr_base(8), armor=Dice(2), damage=2*Dice(4), aggressiveness=100)
+               perception=attr_base(8), armor=Dice(2), damage=2*Dice(4), aggressiveness=0)
 world.new_race("goblin", max_health=5*Dice(6)+30, stamina=5*Dice(10)+40, magic=attr_base(4),
                strength=attr_base(4), agility=attr_base(7), dexterity=attr_base(10), intelligence=attr_base(8),
                perception=attr_base(6), armor=Dice(6), damage=2*Dice(4), aggressiveness=90)
@@ -689,7 +722,7 @@ kitchen = world.new_location("inn's kitchen", "The inn's kitchen is a mess.")
 alley = world.new_location("brown alley", "The alley is filthy.")
 cellar = world.new_location("inn's cellar", "The cellar is a good training ground for beginning adventurers.",
                             obscured=True)
-cellar.add_character(Character("bloodrat"))
+Character("bloodrat").move(cellar)
 cellar.add_item(Weapon("short sword"))
 sleeping_room = world.new_location("sleeping room", "The innkeeper is your friend, you can sleep here for free.")
 start.add_exit("outside", main_street, "inn")
