@@ -46,12 +46,15 @@ class World:
         return self.__enchantments
 
     def enchantment(self, name):
-        if name != '?':
+        if name == "?":
+            result = random.choice(list(self.__enchantments.values()))
+            # never pick permanent results like this.
+            while result.has_permanent_effects():
+                result = random.choice(list(self.__enchantments.values()))
+        else:
             result = self.__enchantments[name]
             if result is None:
                 raise ValueError("unknown enchantement name: " + str(result))
-        else:
-            result = random.choice(list(self.__enchantments.values()))
         return result
 
     def new_weapon_type(self, name, weight, damage_dice, offence, hands):
@@ -278,6 +281,7 @@ class Character(WorldObject, Container):
         else:
             if effect is not None:
                 self.__effects.append(effect)
+                effect.attach_to(self)
 
     def remove_effect(self, effect):
         if effect is not None:
@@ -302,7 +306,7 @@ class Character(WorldObject, Container):
     def consume(self, item):
         if item in self.items():
             if item.consumable():
-                self.drop(item)
+                self.remove_item(item)
                 for e in item.effects():
                     self.add_effect(e)
 
@@ -546,9 +550,11 @@ class WeaponType:
 class Ring(Item):
     def __init__(self, enchantments=None):
         super().__init__("ring", 0, equippable=True, enchantments=enchantments)
-        if enchantments is not None:
-            for e in enchantments:
-                self.enchant(e)
+
+
+class Potion(Item):
+    def __init__(self, enchantment="?"):
+        super().__init__("potion", 1, consumable=True, enchantments=[enchantment])
 
 
 class Corpse(Item, Container):
@@ -601,6 +607,7 @@ class Weapon(Item):
 class Effect:
     def __init__(self, permanent=False):
         self.__permanent = permanent
+        self.__on = None
 
     def apply_attribute(self, attribute, value):
         return value
@@ -610,6 +617,9 @@ class Effect:
 
     def permanent(self):
         return self.__permanent
+
+    def attach_to(self, character):
+        self.__on = character
 
 
 class Enchantment:
@@ -622,6 +632,13 @@ class Enchantment:
 
     def effects(self):
         return self.__effects
+
+    def has_permanent_effects(self):
+        result = False
+        for e in self.__effects:
+            if e.permanent():
+                result = True
+        return result
 
 
 def effect_from_dict(effect_dict):
@@ -702,6 +719,7 @@ world.new_enchantment("ogre %s", [ModifyAttributeEffect("strength", 20)])
 world.new_enchantment("shielding %s", [ModifyAttributeEffect("shielding", Dice(6))])
 world.new_enchantment("warrior %s", [ModifyAttributeEffect("defence", 5), ModifyAttributeEffect("offence", 5)])
 world.new_enchantment("berserk %s", [ModifyAttributeEffect("defence", -5), ModifyAttributeEffect("offence", 10)])
+world.new_enchantment("healing %s", [ModifyAttributeEffect("wounds", -20, permanent=True)])
 
 world.new_race("human", max_health=5*Dice(8)+40, stamina=5*Dice(10)+50, magic=attr_base(4),
                strength=attr_base(6), agility=attr_base(6), dexterity=attr_base(10), intelligence=attr_base(10),
@@ -730,6 +748,7 @@ start.add_exit("kitchen", kitchen, "saloon")
 start.add_exit("up", sleeping_room, "down")
 kitchen.add_exit("outside", alley, "inn")
 kitchen.add_exit("down", cellar, "up")
+kitchen.add_item(Potion("healing %s"))
 
 
 def test():

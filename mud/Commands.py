@@ -70,7 +70,7 @@ def look(words, protagonist):
             return ["Not an exit: " + words[1]]
 
 
-def equip(words, protagonist):
+def action_on_possession(words, protagonist, action):
     ordinal, name = ordinal_and_name(words)
     items = protagonist.items_named(name)
     if len(items) > 0:
@@ -78,24 +78,42 @@ def equip(words, protagonist):
         if item is None:
             return ["Can't find " + ordinal + " " + name + " (must be in your possession)"]
         else:
-            protagonist.equip(item)
-            return ["You equipped " + name]
+            return action(protagonist, item)
     else:
         return ["Can't find " + words[1]]
+
+
+def equip_item(protagonist, item):
+    if item.equippable():
+        protagonist.equip(item)
+        return ["You equipped the " + item.name()]
+    else:
+        return ["You cannot equip the " + item.name()]
+
+
+def equip(words, protagonist):
+    return action_on_possession(words, protagonist, equip_item)
+
+
+def drop_item(protagonist, item):
+    protagonist.drop(item)
+    return ["You dropped the " + item.name()]
 
 
 def drop(words, protagonist):
-    ordinal, name = ordinal_and_name(words)
-    items = protagonist.items_named(name)
-    if len(items) > 0:
-        item = pick(items, ordinal)
-        if item is None:
-            return ["Can't find " + ordinal + " " + name + " (must be in your possession)"]
-        else:
-            protagonist.drop(item)
-            return ["You dropped " + name]
+    return action_on_possession(words, protagonist, drop_item)
+
+
+def drink_item(protagonist, item):
+    if item.consumable():
+        protagonist.consume(item)
+        return ["You drank the " + item.name()]
     else:
-        return ["Can't find " + words[1]]
+        return ["You cannot drink the " + item.name()]
+
+
+def drink(words, protagonist):
+    return action_on_possession(words, protagonist, drink_item)
 
 
 def go(words, protagonist):
@@ -153,8 +171,9 @@ def attack(words, protagonist):
 
 
 # all commands
+max_words = 100
 commands = [
-    Command("help", 0, 100,
+    Command("help", 0, max_words,
             "help [{command}]    offers more help about a command", help_me),
     Command("quit", 0, 0,
             "quit                lets you quit the game", leave),
@@ -164,19 +183,21 @@ commands = [
             "call {x} {y}        renames 'myself' or first item 'x' in belongings (use quotes to make 2 words)", call),
     Command("look", 0, 1,
             "look [{somewhere}]  looks at current room or in a given direction", look),
-    Command("equip", 1, 100,
+    Command("equip", 1, max_words,
             "equip {something}   equips an item in your possession (you may use ordinals: first, second, ...)", equip),
     Command("go", 1, 1,
             "go {somewhere}      goes in given direction", go),
-    Command("inspect", 1, 100,
+    Command("inspect", 1, max_words,
             "inspect {something} inspects item or character named 'something'" 
             "(you may use ordinals: first, second, ...)", inspect),
-    Command("take", 1, 100,
+    Command("take", 1, max_words,
             "take {something}    takes something in the room (you may use ordinals: first, second, ...)", take),
-    Command("attack", 1, 100,
+    Command("attack", 1, max_words,
             "attack {something}  attacks a character in the room (you may use ordinals: first, second, ...)", attack),
-    Command("drop", 1, 100,
-            "drop {something}    drops an item in your possession (you may use ordinals: first, second, ...)", drop)
+    Command("drop", 1, max_words,
+            "drop {something}    drops an item in your possession (you may use ordinals: first, second, ...)", drop),
+    Command("drink", 1, max_words,
+            "drink {something}   drink something in your possession (you may use ordinals: first, second, ...)", drink)
 ]
 
 
