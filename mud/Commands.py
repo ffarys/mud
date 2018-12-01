@@ -1,5 +1,5 @@
 from mud.world.characters import Box
-from mud.world.mechanics import ordinal_and_name, pick, ActionResult, Error
+from mud.world.mechanics import ordinal_and_name, pick, ActionResult, GameMechanicsError
 
 
 class Command:
@@ -25,12 +25,13 @@ class Command:
 
 def help_me(words, protagonist):
     if len(words) > 0:
+        result = ActionResult([], time=0)
         for w in words:
             cmd = find_command(w)
             if cmd is None:
-                result = Error(w+" is an unknown command")
+                result.append(w + " is an unknown command")
             else:
-                result = ActionResult(cmd.description(), time=0)
+                result.append(cmd.description())
     else:
         result = ActionResult(["Hi "+protagonist.name(),
                                "Your commands are: " + ", ".join([c.keyword() for c in commands]),
@@ -53,11 +54,11 @@ def _item_in_location(words, protagonist):
     if len(items) > 0:
         item = pick(items, ordinal)
         if item is None:
-            return Error("Can't find " + ordinal + " " + name)
+            raise GameMechanicsError("Can't find " + ordinal + " " + name)
         else:
             return item
     else:
-        return Error("Can't find " + name)
+        raise GameMechanicsError("Can't find " + name)
 
 
 def _find_something(words, collection, extra="."):
@@ -66,11 +67,11 @@ def _find_something(words, collection, extra="."):
     if len(items) > 0:
         item = pick(items, ordinal)
         if item is None:
-            return Error("Can't find " + ordinal + " " + name + extra)
+            raise GameMechanicsError("Can't find " + ordinal + " " + name + extra)
         else:
             return item
     else:
-        return Error("Can't find " + " ".join(words))
+        raise GameMechanicsError("Can't find " + " ".join(words))
 
 
 def call(words, protagonist):
@@ -82,7 +83,7 @@ def call(words, protagonist):
         protagonist.rename(words[1])
         return ActionResult("You are now called " + words[1], time=0)
     else:
-        return Error("Can't find " + words[0])
+        raise GameMechanicsError("Can't find " + words[0])
 
 
 def look(words, protagonist):
@@ -93,19 +94,22 @@ def look(words, protagonist):
         if direction in protagonist.location().exits():
             return ActionResult(protagonist.location().exit(direction).describe(inside=False))
         else:
-            return Error("Not an exit: " + direction)
+            raise GameMechanicsError("Not an exit: " + direction)
 
 
 def equip(words, protagonist):
     item = _find_something(words, protagonist.items(), " (must be in possession).")
-    if isinstance(item, Error):
-        return item
+    if item.equippable(protagonist):
+        protagonist.equip(item)
+        return ActionResult("You equipped the " + item.name())
     else:
-        if item.equippable():
-            protagonist.equip(item)
-            return ActionResult("You equipped the " + item.name())
-        else:
-            return Error("You cannot equip the " + item.name())
+        raise GameMechanicsError("You cannot equip the " + item.name())
+
+
+def unequip(words, protagonist):
+    item = _find_something(words, [i for i in protagonist.items() if i.is_equipped()], " (must be equipped).")
+    protagonist.unequip(item)
+    return ActionResult("The " + item.name() + " is no longer equipped")
 
 
 def _split_and_find_box(words, protagonist, delimiter):
@@ -115,7 +119,7 @@ def _split_and_find_box(words, protagonist, delimiter):
         first_part_words = words[:position]
         box = _find_something(box_part_words, protagonist.items() + protagonist.location().items())
         if not isinstance(box, Box):
-            box = Error("Must be a box: "+box_part_words)
+            raise GameMechanicsError("Must be a box: " + box_part_words)
         return first_part_words, box
     else:
         return words, None
@@ -123,27 +127,18 @@ def _split_and_find_box(words, protagonist, delimiter):
 
 def drop(words, protagonist):
     words, container = _split_and_find_box(words, protagonist, "in")
-    if isinstance(container, Error):
-        return container
-    else:
-        item = _find_something(words, protagonist.items(), " (must be in possession).")
-        if isinstance(item, Error):
-            return item
-        else:
-            protagonist.drop(item, container)
-            return ActionResult("You dropped the " + item.name())
+    item = _find_something(words, protagonist.items(), " (must be in possession).")
+    protagonist.drop(item, container)
+    return ActionResult("You dropped the " + item.name())
 
 
 def use(words, protagonist):
     item = _find_something(words, protagonist.items(), " (must be in possession).")
-    if isinstance(item, Error):
-        return item
+    if item.consumable():
+        protagonist.consume(item)
+        return ActionResult("You drank the " + item.name())
     else:
-        if item.consumable():
-            protagonist.consume(item)
-            return ActionResult("You drank the " + item.name())
-        else:
-            return Error("You cannot drink the " + item.name())
+        raise GameMechanicsError("You cannot drink the " + item.name())
 
 
 def go(words, protagonist):
@@ -152,34 +147,25 @@ def go(words, protagonist):
         protagonist.move(protagonist.location().exit(direction))
         return ActionResult(protagonist.location().describe())
     else:
-        return Error("Not an exit: " + direction)
+        raise GameMechanicsError("Not an exit: " + direction)
 
 
 def inspect(words, protagonist):
     item = _find_something(words, protagonist.location().characters() + \
                                   protagonist.location().items() + \
                                   protagonist.items())
-    if isinstance(item, Error):
-        return item
-    else:
-        return ActionResult(item.describe())
+    return ActionResult(item.describe())
 
 
 def take(words, protagonist):
     words, box = _split_and_find_box(words, protagonist, "from")
-    if isinstance(box, Error):
-        return Error
+    item = _find_something(words, protagonist.location().items() if box is None else box.items())
+    if box is None:
+        protagonist.location().remove_item(item)
     else:
-        item = _find_something(words, protagonist.location().items() if box is None else box.items())
-        if isinstance(item, Error):
-            return item
-        else:
-            if box is None:
-                protagonist.location().remove_item(item)
-            else:
-                box.remove_item(item)
-            protagonist.acquire(item)
-            return ActionResult("You took " + item.name())
+        box.remove_item(item)
+    protagonist.acquire(item)
+    return ActionResult("You took " + item.name())
 
 
 def attack(words, protagonist):
@@ -191,15 +177,12 @@ def attack(words, protagonist):
                 hostile = c
                 break
         if hostile is None:
-            return Error("No hostiles here.")
+            raise GameMechanicsError("No hostiles here.")
         else:
             return ActionResult(protagonist.attack(hostile))
     else:
         creature = _find_something(words, protagonist.location().characters())
-        if isinstance(creature, Error):
-            return creature
-        else:
-            return ActionResult(protagonist.attack(creature))
+        return ActionResult(protagonist.attack(creature))
 
 
 may_use_ordinals = "\n                    If there are many, you can use ordinals: fist, second, ..."
@@ -220,6 +203,8 @@ commands = [
             "look [{somewhere}]  looks at current room or in a given direction", look),
     Command("equip", 1, max_words,
             "equip {something}   equips an item in your possession"+may_use_ordinals, equip),
+    Command("unequip", 1, max_words,
+            "unequip {something} unequips an item"+may_use_ordinals, unequip),
     Command("go", 1, 1,
             "go {somewhere}      goes in given direction (on of the exits)", go),
     Command("inspect", 1, max_words,
@@ -250,13 +235,13 @@ def find_command(w):
 
 def do_command(words, protagonist):
     if len(words) == 0:
-        help(words, protagonist)
+        return help_me(words, protagonist)
     else:
         command = find_command(words[0])
         if command is None:
-            return Error(["Unknown command: "+words[0], "If unsure, try to type 'help'"])
+            raise GameMechanicsError(["Unknown command: " + words[0], "If unsure, try to type 'help'"])
         elif not command.may_execute(words):
-            return Error(["Wrong number of arguments for " + words[0], command.description()])
+            raise GameMechanicsError(["Wrong number of arguments for " + words[0], command.description()])
         else:
             return command.execute(words[1:], protagonist)
 

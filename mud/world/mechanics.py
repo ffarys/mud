@@ -138,21 +138,14 @@ class ActionResult:
         else:
             self.__sentences = sentences
 
-    def print_action_by_player(self):
-        if self.__error:
-            for s in self.__sentences:
+    def print_action(self, other_than_player=False):
+        for s in self.__sentences:
+            if self.__error:
                 print("\033[91m"+s+"\033[0m")
-        else:
-            for s in self.__sentences:
-                print(s)
-
-    def print_action_by_other(self):
-        if self.__error:
-            for s in self.__sentences:
-                print("\033[91m"+s+"\033[0m")
-        else:
-            for s in self.__sentences:
+            elif other_than_player:
                 print("\033[93m" + s + "\033[0m")
+            else:
+                print(s)
 
     def time(self):
         return self.__time
@@ -161,6 +154,7 @@ class ActionResult:
         self.__sentences.append(sentence)
 
 
-class Error(ActionResult):
+class GameMechanicsError(Exception, ActionResult):
     def __init__(self, sentences):
-        super().__init__(sentences, time=0, error=True)
+        Exception.__init__(self, *sentences)
+        ActionResult.__init__(self, sentences, time=0, error=True)

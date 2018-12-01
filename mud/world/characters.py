@@ -1,7 +1,6 @@
 import json
 import random
-from mud.world.mechanics import Dice, contest, attr_base, noun_with_article
-
+from mud.world.mechanics import Dice, contest, attr_base, noun_with_article, GameMechanicsError
 
 attributes = ["max_health",      # max amount to take damage
               "stamina",         # resist exhaustion, disease
@@ -54,7 +53,7 @@ class World:
         else:
             result = self.__enchantments[name]
             if result is None:
-                raise ValueError("unknown enchantement name: " + str(result))
+                raise GameMechanicsError("Unknown enchantement name: " + str(result))
         return result
 
     def new_weapon_type(self, name, weight, damage_dice, offence, hands):
@@ -107,6 +106,20 @@ class Container:
 
     def items_named(self, name):
         return [c for c in self.__items if c.name() == name]
+
+    def find_items(self, itemtype):
+        result = list()
+        for i in self.__items:
+            if isinstance(i, itemtype):
+                result.append(i)
+        return result
+
+    def find_equipped_items(self, itemtype):
+        result = list()
+        for i in self.__items:
+            if isinstance(i, itemtype) and i.is_equipped():
+                result.append(i)
+        return result
 
 
 class Location(Container):
@@ -277,7 +290,14 @@ class Character(WorldObject, Container):
     def aggressiveness(self):
         return self.attribute("aggressiveness")
 
+    def die(self):
+        self.unequip()
+        self.location().remove_character(self)
+        self.location().add_item(Corpse(self))
+
     def add_effect(self, effect):
+        alive = self.is_alive()
+        effect = effect.attach_to(self)
         if effect.permanent():
             for attr in attributes:
                 value = effect.apply_attribute(attr, self.__attributes[attr])
@@ -287,11 +307,15 @@ class Character(WorldObject, Container):
         else:
             if effect is not None:
                 self.__effects.append(effect)
-                effect.attach_to(self)
+        if alive and not self.is_alive():  # died
+            self.die()
 
     def remove_effect(self, effect):
+        alive = self.is_alive()
         if effect is not None:
             self.__effects.remove(effect)
+        if alive and not self.is_alive():  # died
+            self.die()
 
     def as_dict(self):
         result = {}
@@ -300,7 +324,11 @@ class Character(WorldObject, Container):
         return result
 
     def acquire(self, item):
-        self.add_item(item)
+        if item in self.items():
+            raise GameMechanicsError("Already acquired "+item.name())
+        else:
+            item.set_equipped(False)
+            self.add_item(item)
 
     def drop(self, item, container=None):
         if item in self.items():
@@ -321,10 +349,12 @@ class Character(WorldObject, Container):
 
     def equip(self, item):
         if item in self.items():
-            if item.equippable():
+            if item.equippable(self):
                 item.set_equipped(True)
                 for e in item.effects():
                     self.add_effect(e)
+            else:
+                raise GameMechanicsError("You cannot equip this item")
 
     def unequip(self, item=None):
         if item is None:
@@ -339,24 +369,39 @@ class Character(WorldObject, Container):
                 item.set_equipped(False)
                 for e in item.effects():
                     self.remove_effect(e)
+            else:
+                raise GameMechanicsError("This item is not equipped")
 
     def equipped_weapon(self):
         result = None
         for i in self.items():
-            if type(i) is Weapon and i.is_equipped():
+            if isinstance(i, Weapon) and i.is_equipped():
+                result = i
+        return result
+
+    def equipped_shield(self):
+        result = None
+        for i in self.items():
+            if isinstance(i, Shield) and i.is_equipped():
                 result = i
         return result
 
     def describe(self, everything=False):
-        heading = "You see "+noun_with_article(self.__race.name())+" named '"+self.name()+"'"
+        heading = "You see "+noun_with_article(self.__race.name())+" named '"+self.name()+"';"
         w = self.equipped_weapon()
         if w is not None:
             heading += " armed with " + noun_with_article(w.weapon_type())
+        s = self.equipped_shield()
+        if s is not None:
+            heading += "; carrying a shield"
         result = [heading]
         if everything:
             result.append("; ".join([a + " " + str(self.attribute(a)) for a in attributes]))
             if self.items():
-                result.append("Inventory: "+(", ".join([i.name() for i in self.items()])))
+                result.append("Inventory: "+(", ".join([i.name() + ("*" if i.is_equipped() else "")
+                                                        for i in self.items()])))
+            if self.wounds():
+                result.append("Hit points remaining: "+(self.max_health()-self.wounds()))
         if self.is_hostile():
             result.append("Watch out: the "+self.__race.name()+" is hostile!")
         return result
@@ -378,12 +423,7 @@ class Character(WorldObject, Container):
         return result
 
     def receive_damage(self, damage_done):
-        alive = self.is_alive()
         self.add_effect(damage_effect(damage_done))
-        if alive and not self.is_alive():  # died
-            self.unequip()
-            self.location().remove_character(self)
-            self.location().add_item(Corpse(self))
 
     def move(self, location):
         if self.__location is not None:
@@ -500,7 +540,7 @@ class Item(WorldObject):
     def consumable(self):
         return self.__consumable
 
-    def equippable(self):
+    def equippable(self, character):
         return self.__equippable
 
     def is_equipped(self):
@@ -514,7 +554,7 @@ class Item(WorldObject):
 
     def enchant(self, enchantment="?"):
         if self.__equipped:
-            raise ValueError("Equipped items can not be enchanted.")
+            raise GameMechanicsError("Equipped items can not be enchanted.")
         if type(enchantment) != Enchantment:
             enchantment = world.enchantment(enchantment)
         self.__effects = self.__effects + enchantment.effects()
@@ -565,6 +605,9 @@ class Ring(Item):
     def __init__(self, enchantments=None):
         super().__init__("ring", 0, equippable=True, enchantments=enchantments)
 
+    def equippable(self, character):
+        return len(character.find_equipped_items(Ring)) < 3
+
 
 class Potion(Item):
     def __init__(self, enchantment="?"):
@@ -573,8 +616,32 @@ class Potion(Item):
 
 class Box(Item, Container):
     def __init__(self, name="box", weight=40, equippable=False, items=None):
+        # an equippable box is a backpack
         Item.__init__(self, name=name, weight=weight, equippable=equippable)
         Container.__init__(self, items)
+
+    def equippable(self, character):
+        return len(character.find_equipped_items(Box)) == 0
+
+
+class Shield(Item):
+    def __init__(self, name="shield", weight=40, enchantments=None, defence=5):
+        effects = [ModifyAttributeEffect("defence", defence)]
+        super().__init__(name=name, weight=weight, equippable=True, effects=effects, enchantments=enchantments)
+
+    def equippable(self, character):
+        weapons = character.find_equipped_items(Weapon)
+        shields = character.find_equipped_items(Shield)
+        return len(shields) == 0 and (len(weapons) == 0 or (len(weapons) == 1 and weapons[0].hands() == 1))
+
+
+class Armor(Item):
+    def __init__(self, name="armor", weight=60, enchantments=None, armor=2*Dice(6)):
+        effects = [ModifyAttributeEffect("armor", armor)]
+        super().__init__(name=name, weight=weight, equippable=True, effects=effects, enchantments=enchantments)
+
+    def equippable(self, character):
+        return len(character.equipped_items(Armor)) < 0
 
 
 class Corpse(Item, Container):
@@ -623,6 +690,14 @@ class Weapon(Item):
                 result.append("It is enchanted")
         return result
 
+    def hands(self):
+        return self.__hands
+
+    def equippable(self, character):
+        weapons = character.find_equipped_items(Weapon)
+        shields = character.find_equipped_items(Shield)
+        return len(weapons) == 0 and (len(shields) == 0 or self.hands() == 1)
+
 
 class Effect:
     def __init__(self, permanent=False):
@@ -640,6 +715,8 @@ class Effect:
 
     def attach_to(self, character):
         self.__on = character
+        # allows effects to be modified by resistances, if you pass another effect here
+        return self
 
 
 class Enchantment:
@@ -661,13 +738,20 @@ class Enchantment:
         return result
 
 
+class Spell:
+    def __init__(self, name, effect, targets=None):
+        self.__name = name
+        self.__effect = effect
+        self.__targets = [Character] if targets is None else targets
+
+
 def effect_from_dict(effect_dict):
     type = effect_dict["type"]
     effect_dict.pop("type")  # pop removes and returns last object from the list
     if type == "ModifyAttributeEffect":
         return ModifyAttributeEffect(effect_dict["attribute"], effect_dict["modifier"])
     else:
-        raise ValueError("Type unknown: "+type)
+        raise GameMechanicsError("Type unknown: "+type)
 
 
 class ModifyAttributeEffect(Effect):
@@ -714,7 +798,7 @@ def healing_effect(number):
 
 def build_example_world():
     world.new_weapon_type("arming sword", 10, 2*Dice(10), 6, 1)
-    world.new_weapon_type("scimitar", 10, 3*Dice(6)+1, 5, 1)
+    world.new_weapon_type("scimitar", 10, 2*Dice(10)+2, 4, 1)
     world.new_weapon_type("long sword", 20, 2*Dice(12), 6, 2)
     world.new_weapon_type("short sword", 5, 2*Dice(8), 4, 1)
     world.new_weapon_type("dagger", 2, 2*Dice(6), 2, 1)
@@ -725,6 +809,7 @@ def build_example_world():
     world.new_weapon_type("great axe", 40, 3*Dice(8)+2, 2, 2)
     world.new_weapon_type("halberd", 50, 2*Dice(12), 10, 2)
     world.new_weapon_type("club", 15, 3*Dice(4)+2, 0, 1)
+    world.new_weapon_type("staff", 15, 3 * Dice(6), 4, 2)
 
     world.new_enchantment("eagle %s", [ModifyAttributeEffect("perception", 10)])
     world.new_enchantment("wise %s", [ModifyAttributeEffect("intelligence", 10)])
@@ -764,7 +849,7 @@ def build_example_world():
     Character("bloodrat").move(cellar)
     cellar.add_item(Box(items=[Weapon("short sword")]))
     sleeping_room = world.new_location("sleeping room", "The innkeeper is your friend, you can sleep here for free.")
-    sleeping_room.add_item(Box("chest", weight=200))
+    sleeping_room.add_item(Box("chest", weight=200, items=[Shield()]))
     start.add_exit("outside", main_street, "inn")
     start.add_exit("kitchen", kitchen, "saloon")
     start.add_exit("up", sleeping_room, "down")
