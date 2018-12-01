@@ -178,6 +178,9 @@ class WorldObject:
     def rename(self, name):
         self.__name = name
 
+    def matches(self, name):
+        return self.__name == name
+
 
 class Character(WorldObject, Container):
     def __init__(self, race, name=None, max_health=None, stamina=None, magic=None, strength=None,
@@ -217,6 +220,9 @@ class Character(WorldObject, Container):
         if not self.is_alive():
             result = result + " [DEAD]"
         return result
+
+    def matches(self, name):
+        return self.name() == name or self.race().name() == name
 
     def basic_attribute(self, attr):
         return self.__attributes[attr]
@@ -296,12 +302,15 @@ class Character(WorldObject, Container):
     def acquire(self, item):
         self.add_item(item)
 
-    def drop(self, item):
+    def drop(self, item, container=None):
         if item in self.items():
             if item.is_equipped():
                 self.unequip(item)
             self.remove_item(item)
-            self.location().add_item(item)
+            if container is None:
+                self.location().add_item(item)
+            else:
+                container.add_item(item)
 
     def consume(self, item):
         if item in self.items():
@@ -514,12 +523,17 @@ class Item(WorldObject):
         return self
 
     def describe(self, fully=True):
-        result = ["You see '" + self.__name + "'"]
+        result = ["You see '" + self.name() + "'"]
         if self.is_equipped():
             result.append("It is equipped")
         if fully:
             if self.__enchanted:
                 result.append("It is enchanted")
+        if isinstance(self, Container):
+            if self.items():
+                result.append("It contains: "+", ".join([item.name() for item in self.items()]))
+            else:
+                result.append("It is empty.")
         return result
 
 
@@ -555,6 +569,12 @@ class Ring(Item):
 class Potion(Item):
     def __init__(self, enchantment="?"):
         super().__init__("potion", 1, consumable=True, enchantments=[enchantment])
+
+
+class Box(Item, Container):
+    def __init__(self, name="box", weight=40, equippable=False, items=None):
+        Item.__init__(self, name=name, weight=weight, equippable=equippable)
+        Container.__init__(self, items)
 
 
 class Corpse(Item, Container):
@@ -692,66 +712,69 @@ def healing_effect(number):
     return ModifyAttributeEffect("wounds", -number, permanent=True)
 
 
-world.new_weapon_type("arming sword", 10, 2*Dice(10), 6, 1)
-world.new_weapon_type("scimitar", 10, 3*Dice(6)+1, 5, 1)
-world.new_weapon_type("long sword", 20, 2*Dice(12), 6, 2)
-world.new_weapon_type("short sword", 5, 2*Dice(8), 4, 1)
-world.new_weapon_type("dagger", 2, 2*Dice(6), 2, 1)
-world.new_weapon_type("spear", 15, Dice(20), 8, 2)
-world.new_weapon_type("war hammer", 20, 4*Dice(6), 0, 1)
-world.new_weapon_type("great hammer", 45, 4*Dice(8), 2, 2)
-world.new_weapon_type("war axe", 20, 3*Dice(6)+2, 2, 1)
-world.new_weapon_type("great axe", 40, 3*Dice(8)+2, 2, 2)
-world.new_weapon_type("halberd", 50, 2*Dice(12), 10, 2)
-world.new_weapon_type("club", 15, 3*Dice(4)+2, 0, 1)
+def build_example_world():
+    world.new_weapon_type("arming sword", 10, 2*Dice(10), 6, 1)
+    world.new_weapon_type("scimitar", 10, 3*Dice(6)+1, 5, 1)
+    world.new_weapon_type("long sword", 20, 2*Dice(12), 6, 2)
+    world.new_weapon_type("short sword", 5, 2*Dice(8), 4, 1)
+    world.new_weapon_type("dagger", 2, 2*Dice(6), 2, 1)
+    world.new_weapon_type("spear", 15, Dice(20), 8, 2)
+    world.new_weapon_type("war hammer", 20, 4*Dice(6), 0, 1)
+    world.new_weapon_type("great hammer", 45, 4*Dice(8), 2, 2)
+    world.new_weapon_type("war axe", 20, 3*Dice(6)+2, 2, 1)
+    world.new_weapon_type("great axe", 40, 3*Dice(8)+2, 2, 2)
+    world.new_weapon_type("halberd", 50, 2*Dice(12), 10, 2)
+    world.new_weapon_type("club", 15, 3*Dice(4)+2, 0, 1)
 
-world.new_enchantment("eagle %s", [ModifyAttributeEffect("perception", 10)])
-world.new_enchantment("wise %s", [ModifyAttributeEffect("intelligence", 10)])
-world.new_enchantment("conduit %s", [ModifyAttributeEffect("magic", 5)])
-world.new_enchantment("elven %s", [ModifyAttributeEffect("magic", 10)])
-world.new_enchantment("defender %s", [ModifyAttributeEffect("defence", 5)])
-world.new_enchantment("aggressive %s", [ModifyAttributeEffect("offence", 5)])
-world.new_enchantment("cat %s", [ModifyAttributeEffect("agility", 5)])
-world.new_enchantment("crafting %s", [ModifyAttributeEffect("dexterity", 10)])
-world.new_enchantment("bull %s", [ModifyAttributeEffect("max health", 50)])
-world.new_enchantment("orc %s", [ModifyAttributeEffect("strength", 10)])
-world.new_enchantment("ogre %s", [ModifyAttributeEffect("strength", 20)])
-world.new_enchantment("shielding %s", [ModifyAttributeEffect("shielding", Dice(6))])
-world.new_enchantment("warrior %s", [ModifyAttributeEffect("defence", 5), ModifyAttributeEffect("offence", 5)])
-world.new_enchantment("berserk %s", [ModifyAttributeEffect("defence", -5), ModifyAttributeEffect("offence", 10)])
-world.new_enchantment("healing %s", [ModifyAttributeEffect("wounds", -20, permanent=True)])
+    world.new_enchantment("eagle %s", [ModifyAttributeEffect("perception", 10)])
+    world.new_enchantment("wise %s", [ModifyAttributeEffect("intelligence", 10)])
+    world.new_enchantment("conduit %s", [ModifyAttributeEffect("magic", 5)])
+    world.new_enchantment("elven %s", [ModifyAttributeEffect("magic", 10)])
+    world.new_enchantment("defender %s", [ModifyAttributeEffect("defence", 5)])
+    world.new_enchantment("aggressive %s", [ModifyAttributeEffect("offence", 5)])
+    world.new_enchantment("cat %s", [ModifyAttributeEffect("agility", 5)])
+    world.new_enchantment("crafting %s", [ModifyAttributeEffect("dexterity", 10)])
+    world.new_enchantment("bull %s", [ModifyAttributeEffect("max health", 50)])
+    world.new_enchantment("orc %s", [ModifyAttributeEffect("strength", 10)])
+    world.new_enchantment("ogre %s", [ModifyAttributeEffect("strength", 20)])
+    world.new_enchantment("shielding %s", [ModifyAttributeEffect("shielding", Dice(6))])
+    world.new_enchantment("warrior %s", [ModifyAttributeEffect("defence", 5), ModifyAttributeEffect("offence", 5)])
+    world.new_enchantment("berserk %s", [ModifyAttributeEffect("defence", -5), ModifyAttributeEffect("offence", 10)])
+    world.new_enchantment("healing %s", [ModifyAttributeEffect("wounds", -20, permanent=True)])
 
-world.new_race("human", max_health=5*Dice(8)+40, stamina=5*Dice(10)+50, magic=attr_base(4),
-               strength=attr_base(6), agility=attr_base(6), dexterity=attr_base(10), intelligence=attr_base(10),
-               perception=attr_base(6), armor=Dice(2), damage=Dice(4), aggressiveness=0)
-world.new_race("bloodrat", max_health=5*Dice(4)+10, stamina=5*Dice(8)+40, magic=attr_base(1),
-               strength=attr_base(2), agility=attr_base(6), dexterity=attr_base(2), intelligence=attr_base(2),
-               perception=attr_base(8), armor=Dice(2), damage=2*Dice(4), aggressiveness=0)
-world.new_race("goblin", max_health=5*Dice(6)+30, stamina=5*Dice(10)+40, magic=attr_base(4),
-               strength=attr_base(4), agility=attr_base(7), dexterity=attr_base(10), intelligence=attr_base(8),
-               perception=attr_base(6), armor=Dice(6), damage=2*Dice(4), aggressiveness=90)
-world.new_race("bear", max_health=5*Dice(12)+60, stamina=5*Dice(8)+40, magic=Dice(2),
-               strength=attr_base(12), agility=attr_base(8), dexterity=attr_base(2), intelligence=attr_base(4),
-               perception=attr_base(6), armor=Dice(6)+3, damage=2*Dice(10), aggressiveness=20)
+    world.new_race("human", max_health=5*Dice(8)+40, stamina=5*Dice(10)+50, magic=attr_base(4),
+                   strength=attr_base(6), agility=attr_base(6), dexterity=attr_base(10), intelligence=attr_base(10),
+                   perception=attr_base(6), armor=Dice(2), damage=Dice(4), aggressiveness=0)
+    world.new_race("bloodrat", max_health=5*Dice(4)+10, stamina=5*Dice(8)+40, magic=attr_base(1),
+                   strength=attr_base(2), agility=attr_base(6), dexterity=attr_base(2), intelligence=attr_base(2),
+                   perception=attr_base(8), armor=Dice(2), damage=2*Dice(4), aggressiveness=0)
+    world.new_race("goblin", max_health=5*Dice(6)+30, stamina=5*Dice(10)+40, magic=attr_base(4),
+                   strength=attr_base(4), agility=attr_base(7), dexterity=attr_base(10), intelligence=attr_base(8),
+                   perception=attr_base(6), armor=Dice(6), damage=2*Dice(4), aggressiveness=90)
+    world.new_race("bear", max_health=5*Dice(12)+60, stamina=5*Dice(8)+40, magic=Dice(2),
+                   strength=attr_base(12), agility=attr_base(8), dexterity=attr_base(2), intelligence=attr_base(4),
+                   perception=attr_base(6), armor=Dice(6)+3, damage=2*Dice(10), aggressiveness=20)
 
-start = world.new_location("inn's saloon", "The main room of the adventurer's inn: the saloon.")
-main_street = world.new_location("iain street", "The downtown main street is a busy place.")
-kitchen = world.new_location("inn's kitchen", "The inn's kitchen is a mess.")
-alley = world.new_location("brown alley", "The alley is filthy.")
-cellar = world.new_location("inn's cellar", "The cellar is a good training ground for beginning adventurers.",
-                            obscured=True)
-Character("bloodrat").move(cellar)
-cellar.add_item(Weapon("short sword"))
-sleeping_room = world.new_location("sleeping room", "The innkeeper is your friend, you can sleep here for free.")
-start.add_exit("outside", main_street, "inn")
-start.add_exit("kitchen", kitchen, "saloon")
-start.add_exit("up", sleeping_room, "down")
-kitchen.add_exit("outside", alley, "inn")
-kitchen.add_exit("down", cellar, "up")
-kitchen.add_item(Potion("healing %s"))
+    start = world.new_location("inn's saloon", "The main room of the adventurer's inn: the saloon.")
+    main_street = world.new_location("iain street", "The downtown main street is a busy place.")
+    kitchen = world.new_location("inn's kitchen", "The inn's kitchen is a mess.")
+    alley = world.new_location("brown alley", "The alley is filthy.")
+    cellar = world.new_location("inn's cellar", "The cellar is a good training ground for beginning adventurers.",
+                                obscured=True)
+    Character("bloodrat").move(cellar)
+    cellar.add_item(Box(items=[Weapon("short sword")]))
+    sleeping_room = world.new_location("sleeping room", "The innkeeper is your friend, you can sleep here for free.")
+    sleeping_room.add_item(Box("chest", weight=200))
+    start.add_exit("outside", main_street, "inn")
+    start.add_exit("kitchen", kitchen, "saloon")
+    start.add_exit("up", sleeping_room, "down")
+    kitchen.add_exit("outside", alley, "inn")
+    kitchen.add_exit("down", cellar, "up")
+    kitchen.add_item(Potion("healing %s"))
 
 
 def test():
+    build_example_world()
     fred = Character(race="human", name="Fred", hero=True)
     print(fred)
 

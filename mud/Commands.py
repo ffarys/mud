@@ -1,5 +1,5 @@
-from mud.world.characters import world
-from mud.world.mechanics import ordinal_and_name, pick, is_ordinal
+from mud.world.characters import Box
+from mud.world.mechanics import ordinal_and_name, pick, ActionResult, Error
 
 
 class Command:
@@ -24,18 +24,17 @@ class Command:
 
 
 def help_me(words, protagonist):
-    if len(words) > 1:
-        result = []
+    if len(words) > 0:
         for w in words:
             cmd = find_command(w)
             if cmd is None:
-                result.append(w+" is an unknown command")
+                result = Error(w+" is an unknown command")
             else:
-                result.append(cmd.description())
+                result = ActionResult(cmd.description(), time=0)
     else:
-        result = ["Hi "+protagonist.name(),
-                  "Your commands are: " + ", ".join([c.keyword() for c in commands]),
-                  "Type 'help {command}' for more info"]
+        result = ActionResult(["Hi "+protagonist.name(),
+                               "Your commands are: " + ", ".join([c.keyword() for c in commands]),
+                               "Type 'help {command}' for more info"], time=0)
     return result
 
 
@@ -45,129 +44,165 @@ def leave(words, protagonist):
 
 
 def myself(words, protagonist):
-    return protagonist.describe(everything=True)
+    return ActionResult(protagonist.describe(everything=True), time=0)
 
 
-def call(words, protagonist):
-    item = protagonist.items_named(words[1])
-    if len(item) > 0:
-        item[0].rename(words[2])
-        return ["You renamed " + words[1] + " as " + words[2]]
-    elif words[1] == 'myself' or words[1] == protagonist.name():
-        protagonist.rename(words[2])
-        return ["You are now called " + words[2]]
-    else:
-        return ["Can't find " + words[1]]
-
-
-def look(words, protagonist):
-    if len(words) == 1 or words[1] == "around" or words[1] == "here":
-        return protagonist.location().describe()
-    else:
-        if words[1] in protagonist.location().exits():
-            return protagonist.location().exit(words[1]).describe(inside=False)
-        else:
-            return ["Not an exit: " + words[1]]
-
-
-def action_on_possession(words, protagonist, action):
-    ordinal, name = ordinal_and_name(words)
-    items = protagonist.items_named(name)
-    if len(items) > 0:
-        item = pick(items, ordinal)
-        if item is None:
-            return ["Can't find " + ordinal + " " + name + " (must be in your possession)"]
-        else:
-            return action(protagonist, item)
-    else:
-        return ["Can't find " + words[1]]
-
-
-def equip_item(protagonist, item):
-    if item.equippable():
-        protagonist.equip(item)
-        return ["You equipped the " + item.name()]
-    else:
-        return ["You cannot equip the " + item.name()]
-
-
-def equip(words, protagonist):
-    return action_on_possession(words, protagonist, equip_item)
-
-
-def drop_item(protagonist, item):
-    protagonist.drop(item)
-    return ["You dropped the " + item.name()]
-
-
-def drop(words, protagonist):
-    return action_on_possession(words, protagonist, drop_item)
-
-
-def drink_item(protagonist, item):
-    if item.consumable():
-        protagonist.consume(item)
-        return ["You drank the " + item.name()]
-    else:
-        return ["You cannot drink the " + item.name()]
-
-
-def drink(words, protagonist):
-    return action_on_possession(words, protagonist, drink_item)
-
-
-def go(words, protagonist):
-    if words[1] in protagonist.location().exits():
-        protagonist.move(protagonist.location().exit(words[1]))
-        return protagonist.location().describe()
-    else:
-        return ["Not an exit:" + words[1]]
-
-
-def inspect(words, protagonist):
-    ordinal, name = ordinal_and_name(words)
-    things = protagonist.location().characters_named(name) + \
-             protagonist.location().items_named(name) + \
-             protagonist.items_named(name)
-    if things:
-        thing = pick(things, ordinal)
-        if thing is None:
-            result = ["Can't find " + ordinal + " " + name]
-        else:
-            result = thing.describe()
-        if len(things) > 1:
-            result.append("Note that there are "+str(len(things))+" things called '"+name+"' here.")
-        return result
-    else:
-        return ["Can't find " + words[1]+", or not specific enough"]
-
-
-def take(words, protagonist):
+def _item_in_location(words, protagonist):
     ordinal, name = ordinal_and_name(words)
     items = protagonist.location().items_named(name)
     if len(items) > 0:
         item = pick(items, ordinal)
         if item is None:
-            return ["Can't find " + ordinal + " " + name]
+            return Error("Can't find " + ordinal + " " + name)
         else:
-            protagonist.location().remove_item(item)
-            protagonist.acquire(item)
-            return ["You took " + item.name()]
+            return item
     else:
-        return ["Can't find " + name]
+        return Error("Can't find " + name)
+
+
+def _find_something(words, collection, extra="."):
+    ordinal, name = ordinal_and_name(words)
+    items = [i for i in collection if i.matches(name)]
+    if len(items) > 0:
+        item = pick(items, ordinal)
+        if item is None:
+            return Error("Can't find " + ordinal + " " + name + extra)
+        else:
+            return item
+    else:
+        return Error("Can't find " + " ".join(words))
+
+
+def call(words, protagonist):
+    item = protagonist.items_named(words[0])
+    if len(item) > 0:
+        item[0].rename(words[1])
+        return ActionResult("You renamed " + words[0] + " as " + words[1], time=0)
+    elif words[0] == 'myself' or words[0] == protagonist.name():
+        protagonist.rename(words[1])
+        return ActionResult("You are now called " + words[1], time=0)
+    else:
+        return Error("Can't find " + words[0])
+
+
+def look(words, protagonist):
+    if len(words) == 0 or words[0] == "around" or words[0] == "here":
+        return ActionResult(protagonist.location().describe())
+    else:
+        direction = " ".join(words)
+        if direction in protagonist.location().exits():
+            return ActionResult(protagonist.location().exit(direction).describe(inside=False))
+        else:
+            return Error("Not an exit: " + direction)
+
+
+def equip(words, protagonist):
+    item = _find_something(words, protagonist.items(), " (must be in possession).")
+    if isinstance(item, Error):
+        return item
+    else:
+        if item.equippable():
+            protagonist.equip(item)
+            return ActionResult("You equipped the " + item.name())
+        else:
+            return Error("You cannot equip the " + item.name())
+
+
+def _split_and_find_box(words, protagonist, delimiter):
+    if delimiter in words:
+        position = words.index(delimiter)
+        box_part_words = words[position+1:]
+        first_part_words = words[:position]
+        box = _find_something(box_part_words, protagonist.items() + protagonist.location().items())
+        if not isinstance(box, Box):
+            box = Error("Must be a box: "+box_part_words)
+        return first_part_words, box
+    else:
+        return words, None
+
+
+def drop(words, protagonist):
+    words, container = _split_and_find_box(words, protagonist, "in")
+    if isinstance(container, Error):
+        return container
+    else:
+        item = _find_something(words, protagonist.items(), " (must be in possession).")
+        if isinstance(item, Error):
+            return item
+        else:
+            protagonist.drop(item, container)
+            return ActionResult("You dropped the " + item.name())
+
+
+def use(words, protagonist):
+    item = _find_something(words, protagonist.items(), " (must be in possession).")
+    if isinstance(item, Error):
+        return item
+    else:
+        if item.consumable():
+            protagonist.consume(item)
+            return ActionResult("You drank the " + item.name())
+        else:
+            return Error("You cannot drink the " + item.name())
+
+
+def go(words, protagonist):
+    direction = " ".join(words)
+    if direction in protagonist.location().exits():
+        protagonist.move(protagonist.location().exit(direction))
+        return ActionResult(protagonist.location().describe())
+    else:
+        return Error("Not an exit: " + direction)
+
+
+def inspect(words, protagonist):
+    item = _find_something(words, protagonist.location().characters() + \
+                                  protagonist.location().items() + \
+                                  protagonist.items())
+    if isinstance(item, Error):
+        return item
+    else:
+        return ActionResult(item.describe())
+
+
+def take(words, protagonist):
+    words, box = _split_and_find_box(words, protagonist, "from")
+    if isinstance(box, Error):
+        return Error
+    else:
+        item = _find_something(words, protagonist.location().items() if box is None else box.items())
+        if isinstance(item, Error):
+            return item
+        else:
+            if box is None:
+                protagonist.location().remove_item(item)
+            else:
+                box.remove_item(item)
+            protagonist.acquire(item)
+            return ActionResult("You took " + item.name())
 
 
 def attack(words, protagonist):
-    ordinal, name = ordinal_and_name(words)
-    creatures = protagonist.location().characters_named(name)
-    if len(creatures) > 0:
-        creature = pick(creatures, ordinal)
-        if creature is None:
-            return ["Can't find " + ordinal + " " + name]
+    if len(words) < 1:
+        creatures = protagonist.location().characters()
+        hostile = None
+        for c in creatures:
+            if c.is_hostile():
+                hostile = c
+                break
+        if hostile is None:
+            return Error("No hostiles here.")
         else:
-            return protagonist.attack(creature)
+            return ActionResult(protagonist.attack(hostile))
     else:
-        return ["Can't find " + name]
+        creature = _find_something(words, protagonist.location().characters())
+        if isinstance(creature, Error):
+            return creature
+        else:
+            return ActionResult(protagonist.attack(creature))
+
+
+may_use_ordinals = "\n                    If there are many, you can use ordinals: fist, second, ..."
 
 
 # all commands
@@ -184,20 +219,23 @@ commands = [
     Command("look", 0, 1,
             "look [{somewhere}]  looks at current room or in a given direction", look),
     Command("equip", 1, max_words,
-            "equip {something}   equips an item in your possession (you may use ordinals: first, second, ...)", equip),
+            "equip {something}   equips an item in your possession"+may_use_ordinals, equip),
     Command("go", 1, 1,
-            "go {somewhere}      goes in given direction", go),
+            "go {somewhere}      goes in given direction (on of the exits)", go),
     Command("inspect", 1, max_words,
-            "inspect {something} inspects item or character named 'something'" 
-            "(you may use ordinals: first, second, ...)", inspect),
+            "inspect {something} inspects item or character named 'something'"+may_use_ordinals, inspect),
     Command("take", 1, max_words,
-            "take {something}    takes something in the room (you may use ordinals: first, second, ...)", take),
-    Command("attack", 1, max_words,
-            "attack {something}  attacks a character in the room (you may use ordinals: first, second, ...)", attack),
+            "take {something}    takes something in the room or [from] a box"+may_use_ordinals, take),
+    Command("attack", 0, max_words,
+            "attack {something}  attacks a character in the room with your equipped weapon"+may_use_ordinals +
+            "                    you may also type 'attack' to attack the first hostile enemy", attack),
     Command("drop", 1, max_words,
-            "drop {something}    drops an item in your possession (you may use ordinals: first, second, ...)", drop),
-    Command("drink", 1, max_words,
-            "drink {something}   drink something in your possession (you may use ordinals: first, second, ...)", drink)
+            "drop {something}    drops an item in your possession on the floor or [in] a box"+may_use_ordinals, drop),
+    Command("put", 1, max_words,
+            "put {something}     puts an item in your possession on the floor or [in] a box"+may_use_ordinals, drop),
+    Command("use", 1, max_words,
+            "use {something}     use something (potion, scroll) in your possession" +
+            may_use_ordinals, use)
 ]
 
 
@@ -216,9 +254,9 @@ def do_command(words, protagonist):
     else:
         command = find_command(words[0])
         if command is None:
-            return["Unknown command: "+words[0], "If unsure, try to type 'help'"]
+            return Error(["Unknown command: "+words[0], "If unsure, try to type 'help'"])
         elif not command.may_execute(words):
-            return ["Wrong number of arguments for " + words[0], command.description()]
+            return Error(["Wrong number of arguments for " + words[0], command.description()])
         else:
-            return command.execute(words, protagonist)
+            return command.execute(words[1:], protagonist)
 

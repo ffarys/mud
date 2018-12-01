@@ -115,14 +115,52 @@ def is_ordinal(ordinal):
 
 
 def ordinal_and_name(words):
-    if len(words) > 2 and is_ordinal(words[1]):
+    if len(words) > 1 and is_ordinal(words[0]):
         ordinal = words[1]
-        name = " ".join(words[2:])
+        name = " ".join(words[1:])
     else:
         ordinal = "first"
-        name = " ".join(words[1:])
+        name = " ".join(words)
     return ordinal, name
 
 
 def percent_roll(n):
     return n >= randint(1, 100)
+
+
+class ActionResult:
+    def __init__(self, sentences, time=1, error=False):
+        self.__error = error
+        # time elapsed doing the action
+        self.__time = time
+        if isinstance(sentences, str):
+            self.__sentences = [sentences]
+        else:
+            self.__sentences = sentences
+
+    def print_action_by_player(self):
+        if self.__error:
+            for s in self.__sentences:
+                print("\033[91m"+s+"\033[0m")
+        else:
+            for s in self.__sentences:
+                print(s)
+
+    def print_action_by_other(self):
+        if self.__error:
+            for s in self.__sentences:
+                print("\033[91m"+s+"\033[0m")
+        else:
+            for s in self.__sentences:
+                print("\033[93m" + s + "\033[0m")
+
+    def time(self):
+        return self.__time
+
+    def append(self, sentence):
+        self.__sentences.append(sentence)
+
+
+class Error(ActionResult):
+    def __init__(self, sentences):
+        super().__init__(sentences, time=0, error=True)
