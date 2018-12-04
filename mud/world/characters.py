@@ -53,7 +53,7 @@ class World:
         else:
             result = self.__enchantments[name]
             if result is None:
-                raise GameMechanicsError("Unknown enchantement name: " + str(result))
+                raise GameMechanicsError("Unknown enchantment name: " + str(result))
         return result
 
     def new_weapon_type(self, name, weight, damage_dice, offence, hands):
@@ -555,7 +555,7 @@ class Item(WorldObject):
     def enchant(self, enchantment="?"):
         if self.__equipped:
             raise GameMechanicsError("Equipped items can not be enchanted.")
-        if type(enchantment) != Enchantment:
+        if not isinstance(enchantment, Enchantment):
             enchantment = world.enchantment(enchantment)
         self.__effects = self.__effects + enchantment.effects()
         self.rename(enchantment.name() % self.name())
@@ -859,6 +859,7 @@ def build_example_world():
     kitchen.add_exit("outside", alley, "inn")
     kitchen.add_exit("down", cellar, "up")
     kitchen.add_item(Potion("healing %s"))
+    kitchen.add_item(Potion("?"))
 
 
 def test():
