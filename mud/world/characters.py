@@ -401,7 +401,7 @@ class Character(WorldObject, Container):
                 result.append("Inventory: "+(", ".join([i.name() + ("*" if i.is_equipped() else "")
                                                         for i in self.items()])))
             if self.wounds():
-                result.append("Hit points remaining: "+(self.max_health()-self.wounds()))
+                result.append("Hit points remaining: "+str(self.max_health()-self.wounds()))
         if self.is_hostile():
             result.append("Watch out: the "+self.__race.name()+" is hostile!")
         return result
@@ -655,6 +655,9 @@ class Corpse(Item, Container):
         if self.items():
             result.append(["It holds: "+(", ".join(self.items()))])
         return result
+
+    def matches(self, name):
+        return self.name() == name or "corpse" == name
 
 
 class Weapon(Item):

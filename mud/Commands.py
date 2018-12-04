@@ -41,7 +41,7 @@ def help_me(words, protagonist):
 
 def leave(words, protagonist):
     protagonist.leave()
-    return words
+    return ActionResult("leaving.")
 
 
 def myself(words, protagonist):
